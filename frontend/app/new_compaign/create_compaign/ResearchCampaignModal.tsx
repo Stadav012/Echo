@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 type ResearchCampaignModalProps = {
   isOpen: boolean;
@@ -15,6 +16,12 @@ const initialState = {
   endAt: "",
 };
 
+const RESEARCH_ASSETS_BUCKET = "research-assets";
+
+function sanitizeFileName(fileName: string) {
+  return fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
 export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampaignModalProps) {
   const [questionBankMode, setQuestionBankMode] = useState<"text" | "file">("text");
   const [title, setTitle] = useState(initialState.title);
@@ -22,6 +29,11 @@ export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampa
   const [questionBankText, setQuestionBankText] = useState(initialState.questionBankText);
   const [startAt, setStartAt] = useState(initialState.startAt);
   const [endAt, setEndAt] = useState(initialState.endAt);
+  const [questionBankFile, setQuestionBankFile] = useState<File | null>(null);
+  const [contactListFile, setContactListFile] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -33,18 +45,99 @@ export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampa
   }, [isOpen]);
 
   const handleClose = () => {
+    if (isSubmitting) return;
     setTitle(initialState.title);
     setDescription(initialState.description);
     setQuestionBankText(initialState.questionBankText);
     setStartAt(initialState.startAt);
     setEndAt(initialState.endAt);
     setQuestionBankMode("text");
+    setQuestionBankFile(null);
+    setContactListFile(null);
+    setErrorMessage(null);
+    setSuccessMessage(null);
     onClose();
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    handleClose();
+
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setIsSubmitting(true);
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError || !session?.user?.id) {
+        throw new Error("You must be signed in to create a research campaign.");
+      }
+
+      if (!contactListFile) {
+        throw new Error("Please upload a contact list CSV file.");
+      }
+
+      if (questionBankMode === "file" && !questionBankFile) {
+        throw new Error("Please upload a question bank PDF file.");
+      }
+
+      const userId = session.user.id;
+      const timePrefix = Date.now();
+
+      let questionBankFilePath: string | null = null;
+      if (questionBankMode === "file" && questionBankFile) {
+        questionBankFilePath = `${userId}/question-bank/${timePrefix}-${sanitizeFileName(questionBankFile.name)}`;
+        const { error: uploadQuestionBankError } = await supabase.storage
+          .from(RESEARCH_ASSETS_BUCKET)
+          .upload(questionBankFilePath, questionBankFile, { upsert: false });
+
+        if (uploadQuestionBankError) {
+          throw new Error(`Failed to upload question bank PDF: ${uploadQuestionBankError.message}`);
+        }
+      }
+
+      const contactListFilePath = `${userId}/contact-list/${timePrefix}-${sanitizeFileName(contactListFile.name)}`;
+      const { error: uploadContactListError } = await supabase.storage
+        .from(RESEARCH_ASSETS_BUCKET)
+        .upload(contactListFilePath, contactListFile, { upsert: false });
+
+      if (uploadContactListError) {
+        throw new Error(`Failed to upload contact list CSV: ${uploadContactListError.message}`);
+      }
+
+      const { error: insertError } = await supabase.from("research_campaigns").insert({
+        user_id: userId,
+        title,
+        description,
+        question_bank_mode: questionBankMode,
+        question_bank_text: questionBankMode === "text" ? questionBankText : null,
+        question_bank_file_name: questionBankMode === "file" && questionBankFile ? questionBankFile.name : null,
+        question_bank_file_path: questionBankMode === "file" ? questionBankFilePath : null,
+        question_bank_file_type: questionBankMode === "file" && questionBankFile ? questionBankFile.type || "application/pdf" : null,
+        contact_list_file_name: contactListFile.name,
+        contact_list_file_path: contactListFilePath,
+        contact_list_file_type: contactListFile.type || "text/csv",
+        timeline_start: new Date(startAt).toISOString(),
+        timeline_end: new Date(endAt).toISOString(),
+      });
+
+      if (insertError) {
+        throw new Error(`Failed to save research campaign: ${insertError.message}`);
+      }
+
+      setSuccessMessage("Research campaign created successfully.");
+      setTimeout(() => {
+        handleClose();
+      }, 600);
+    } catch (error) {
+      const fallbackMessage = "Unable to create research campaign. Please try again.";
+      setErrorMessage(error instanceof Error ? error.message : fallbackMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -141,7 +234,10 @@ export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampa
                   type="button"
                   className={questionBankMode === "text" ? "btn btn-primary" : "btn btn-secondary"}
                   style={{ fontSize: "13px", padding: "8px 14px" }}
-                  onClick={() => setQuestionBankMode("text")}
+                  onClick={() => {
+                    setQuestionBankMode("text");
+                    setQuestionBankFile(null);
+                  }}
                 >
                   Enter Text
                 </button>
@@ -163,7 +259,7 @@ export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampa
                   onChange={(event) => setQuestionBankText(event.target.value)}
                   rows={5}
                   style={{ resize: "vertical", minHeight: "130px" }}
-                  required
+                  required={questionBankMode === "text"}
                 />
               ) : (
                 <div>
@@ -171,8 +267,12 @@ export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampa
                     className="input-base"
                     type="file"
                     accept=".pdf,application/pdf"
-                    required
+                    required={questionBankMode === "file"}
                     style={{ padding: "10px 12px" }}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      setQuestionBankFile(file);
+                    }}
                   />
                   <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>
                     Accepted format: PDF
@@ -192,6 +292,10 @@ export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampa
                 accept=".csv,text/csv"
                 required
                 style={{ padding: "10px 12px" }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  setContactListFile(file);
+                }}
               />
               <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>
                 Upload columns like name, contact, age, occupation, and any custom fields you need.
@@ -226,12 +330,29 @@ export default function ResearchCampaignModal({ isOpen, onClose }: ResearchCampa
             </div>
           </div>
 
+          {(errorMessage || successMessage) && (
+            <div
+              style={{
+                marginTop: "14px",
+                padding: "10px 12px",
+                borderRadius: "var(--radius-md)",
+                fontSize: "13px",
+                border: "1px solid",
+                borderColor: errorMessage ? "var(--danger)" : "var(--success)",
+                color: errorMessage ? "#991B1B" : "#065F46",
+                background: errorMessage ? "var(--danger-light)" : "var(--success-light)",
+              }}
+            >
+              {errorMessage || successMessage}
+            </div>
+          )}
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "22px", paddingTop: "16px", paddingBottom: "50px", borderTop: "1px solid var(--border-light)" }}>
-            <button type="button" className="btn btn-secondary" onClick={handleClose}>
+            <button type="button" className="btn btn-secondary" onClick={handleClose} disabled={isSubmitting}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Create Research Campaign
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? "Creating..." : "Create Research Campaign"}
             </button>
           </div>
         </form>
