@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ResearchCampaignModal from "@/app/new_compaign/create_compaign/ResearchCampaignModal";
 
 const campaigns = [
   {
@@ -79,6 +80,7 @@ const statusConfig: Record<string, { label: string; className: string; dotClass:
 
 export default function CampaignsPage() {
   const [filter, setFilter] = useState("all");
+  const [isCreateCampaignOpen, setIsCreateCampaignOpen] = useState(false);
 
   const filtered = filter === "all" ? campaigns : campaigns.filter((c) => c.status === filter);
 
@@ -101,7 +103,11 @@ export default function CampaignsPage() {
             Manage and monitor all your research interview campaigns
           </p>
         </div>
-        <button className="btn btn-primary" style={{ padding: "10px 24px", fontSize: "14px" }}>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "10px 24px", fontSize: "14px" }}
+          onClick={() => setIsCreateCampaignOpen(true)}
+        >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
@@ -276,6 +282,11 @@ export default function CampaignsPage() {
           );
         })}
       </div>
+
+      <ResearchCampaignModal
+        isOpen={isCreateCampaignOpen}
+        onClose={() => setIsCreateCampaignOpen(false)}
+      />
     </div>
   );
 }

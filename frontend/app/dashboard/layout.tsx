@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import ResearchCampaignModal from "@/app/new_compaign/create_compaign/ResearchCampaignModal";
 
 const navItems = [
   {
@@ -41,6 +42,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [isCreateCampaignOpen, setIsCreateCampaignOpen] = useState(false);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -258,7 +260,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
           </button>
-          <button className="btn btn-primary" style={{ padding: "8px 20px", fontSize: "13px" }}>
+          <button
+            className="btn btn-primary"
+            style={{ padding: "8px 20px", fontSize: "13px" }}
+            onClick={() => setIsCreateCampaignOpen(true)}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
@@ -268,6 +274,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <main style={{ flex: 1, padding: "32px" }}>{children}</main>
       </div>
+
+      <ResearchCampaignModal
+        isOpen={isCreateCampaignOpen}
+        onClose={() => setIsCreateCampaignOpen(false)}
+      />
     </div>
   );
 }
