@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 type ResearchCampaignModalProps = {
   isOpen: boolean;
@@ -41,6 +42,8 @@ export default function ResearchCampaignModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showRefinePrompt, setShowRefinePrompt] = useState(false);
+  const [createdResearchId, setCreatedResearchId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -63,6 +66,8 @@ export default function ResearchCampaignModal({
     setContactListFile(null);
     setErrorMessage(null);
     setSuccessMessage(null);
+    setShowRefinePrompt(false);
+    setCreatedResearchId(null);
     onClose();
   };
 
@@ -156,9 +161,8 @@ export default function ResearchCampaignModal({
       }
 
       setSuccessMessage("Research campaign created successfully.");
-      setTimeout(() => {
-        handleClose();
-      }, 600);
+      setCreatedResearchId(insertedResearch?.id ?? null);
+      setShowRefinePrompt(true);
     } catch (error) {
       const fallbackMessage =
         "Unable to create research campaign. Please try again.";
@@ -489,6 +493,64 @@ export default function ResearchCampaignModal({
           </div>
         </form>
       </div>
+
+      {showRefinePrompt && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Refine research with AI"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 90,
+            background: "rgba(17, 24, 39, 0.38)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+        >
+          <div
+            className="card animate-scale-in"
+            style={{
+              width: "min(520px, 100%)",
+              padding: "22px",
+              borderRadius: "var(--radius-lg)",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <h3 style={{ fontSize: "20px", fontWeight: 700, color: "var(--text-primary)", marginBottom: "8px" }}>
+              Refine this research with AI?
+            </h3>
+            <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginBottom: "18px", lineHeight: 1.5 }}>
+              You can improve your research questions and add richer context in a guided AI chat.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleClose}
+              >
+                No, maybe later
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const query = new URLSearchParams({
+                    title,
+                    ...(createdResearchId ? { researchId: createdResearchId } : {}),
+                  });
+                  handleClose();
+                  router.push(`/new_compaign/compaign_followup?${query.toString()}`);
+                }}
+              >
+                Yes, refine with AI
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
