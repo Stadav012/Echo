@@ -34,9 +34,30 @@ const navItems = [
     label: "Analytics",
     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
   },
+  {
+    href: "/dashboard/settings",
+    label: "Settings",
+    icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z",
+  },
 ];
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function getInitials(name: string | null, email: string) {
+  if (name?.trim())
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  return email.slice(0, 2).toUpperCase();
+}
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
@@ -46,22 +67,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const fetchUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
         router.push("/auth/login");
         return;
       }
       setUser(session.user);
-      
+
       const { data: profileData } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", session.user.id)
         .single();
-        
-      if (profileData) {
-        setProfile(profileData);
-      }
+
+      if (profileData) setProfile(profileData);
     };
     fetchUser();
   }, [router]);
@@ -73,9 +94,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
 
+  const displayName =
+    profile?.full_name || user?.user_metadata?.full_name || null;
+  const isSettingsActive = pathname.startsWith("/dashboard/settings");
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-base)" }}>
-      {/* Sidebar — light */}
+    <div
+      style={{
+        display: "flex",
+        minHeight: "100vh",
+        background: "var(--bg-base)",
+      }}
+    >
       <aside
         style={{
           width: collapsed ? "72px" : "260px",
@@ -92,7 +122,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           zIndex: 50,
         }}
       >
-        {/* Logo */}
         <div
           style={{
             padding: collapsed ? "20px 16px" : "20px 24px",
@@ -102,18 +131,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             borderBottom: "1px solid var(--sidebar-border)",
           }}
         >
-          <div className="soundwave soundwave-sm soundwave-static" style={{ flexShrink: 0 }}>
+          <div
+            className="soundwave soundwave-sm soundwave-static"
+            style={{ flexShrink: 0 }}
+          >
             {Array.from({ length: 7 }).map((_, i) => (
               <div key={i} className="soundwave-bar" />
             ))}
           </div>
           {!collapsed && (
-            <span style={{ fontSize: "20px", fontWeight: 700, color: "var(--text-primary)" }}>Echo</span>
+            <span
+              style={{
+                fontSize: "20px",
+                fontWeight: 700,
+                color: "var(--text-primary)",
+              }}
+            >
+              Echo
+            </span>
           )}
         </div>
 
-        {/* Nav items */}
-        <nav style={{ flex: 1, padding: "16px 12px", display: "flex", flexDirection: "column", gap: "2px" }}>
+        <nav
+          style={{
+            flex: 1,
+            padding: "16px 12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "2px",
+            overflowY: "auto",
+          }}
+        >
           {navItems.map((item) => {
             const active = isActive(item.href, item.exact);
             return (
@@ -163,16 +211,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     }}
                   />
                 )}
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ flexShrink: 0 }}
+                >
                   <path d={item.icon} />
                 </svg>
                 {!collapsed && <span>{item.label}</span>}
                 {!collapsed && item.badge && (
-                  <span style={{
-                    marginLeft: "auto", background: "var(--primary)", color: "#fff",
-                    fontSize: "11px", fontWeight: 700, padding: "2px 8px",
-                    borderRadius: "var(--radius-full)", minWidth: "20px", textAlign: "center",
-                  }}>
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      background: "var(--primary)",
+                      color: "#fff",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "var(--radius-full)",
+                      minWidth: "20px",
+                      textAlign: "center",
+                    }}
+                  >
                     {item.badge}
                   </span>
                 )}
@@ -181,91 +247,221 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        {/* Bottom */}
-        <div style={{ padding: "12px", borderTop: "1px solid var(--sidebar-border)" }}>
+        <div
+          style={{
+            padding: "12px",
+            borderTop: "1px solid var(--sidebar-border)",
+          }}
+        >
           <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
-              display: "flex", alignItems: "center", gap: "12px",
-              padding: collapsed ? "10px" : "10px 14px", borderRadius: "var(--radius-sm)",
-              background: "transparent", color: "var(--sidebar-text)",
-              border: "none", cursor: "pointer", fontSize: "13px", fontFamily: "inherit",
-              width: "100%", justifyContent: collapsed ? "center" : "flex-start",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              padding: collapsed ? "10px" : "10px 14px",
+              borderRadius: "var(--radius-sm)",
+              background: "transparent",
+              color: "var(--sidebar-text)",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontFamily: "inherit",
+              width: "100%",
+              justifyContent: collapsed ? "center" : "flex-start",
               transition: "all 150ms ease",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--sidebar-hover)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--sidebar-hover)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+            }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
-              style={{ flexShrink: 0, transform: collapsed ? "rotate(180deg)" : "none", transition: "transform 250ms ease" }}>
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                flexShrink: 0,
+                transform: collapsed ? "rotate(180deg)" : "none",
+                transition: "transform 250ms ease",
+              }}
+            >
               <path d="M11 19l-7-7 7-7M18 19l-7-7 7-7" />
             </svg>
             {!collapsed && <span>Collapse</span>}
           </button>
 
-          <div
+          <Link
+            href="/dashboard/settings"
             style={{
-              display: "flex", alignItems: "center", gap: "10px",
-              padding: collapsed ? "10px" : "10px 14px", borderRadius: "var(--radius-sm)",
-              marginTop: "4px", justifyContent: collapsed ? "center" : "flex-start",
-              cursor: "pointer", transition: "all 150ms ease",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: collapsed ? "10px" : "10px 14px",
+              borderRadius: "var(--radius-sm)",
+              marginTop: "4px",
+              justifyContent: collapsed ? "center" : "flex-start",
+              textDecoration: "none",
+              background: isSettingsActive
+                ? "var(--sidebar-active)"
+                : "transparent",
+              transition: "all 150ms ease",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--sidebar-hover)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            title={collapsed ? "Settings" : undefined}
+            onMouseEnter={(e) => {
+              if (!isSettingsActive) {
+                e.currentTarget.style.background = "var(--sidebar-hover)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSettingsActive) {
+                e.currentTarget.style.background = "transparent";
+              }
+            }}
           >
-            <div style={{
-              width: "32px", height: "32px", borderRadius: "50%",
-              background: "linear-gradient(135deg, var(--primary), var(--primary-hover))",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: "13px", fontWeight: 700, color: "#fff", flexShrink: 0,
-            }}>
-              DR
+            <div
+              style={{
+                width: "32px",
+                height: "32px",
+                borderRadius: "50%",
+                background: isSettingsActive
+                  ? "var(--primary)"
+                  : "linear-gradient(135deg, var(--primary), var(--primary-hover))",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "13px",
+                fontWeight: 700,
+                color: "#fff",
+                flexShrink: 0,
+                border: isSettingsActive
+                  ? "2px solid var(--primary-dark)"
+                  : "none",
+              }}
+            >
+              {getInitials(displayName, user.email)}
             </div>
+
             {!collapsed && (
-              <div style={{ overflow: "hidden" }}>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {profile?.full_name || "Researcher"}
+              <div style={{ overflow: "hidden", flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: isSettingsActive
+                      ? "var(--primary-text)"
+                      : "var(--text-primary)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {displayName || "Researcher"}
                 </div>
-                <div style={{ fontSize: "11px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text-muted)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
                   {user.email}
                 </div>
               </div>
             )}
-          </div>
+
+            {!collapsed && (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={
+                  isSettingsActive ? "var(--primary)" : "var(--text-muted)"
+                }
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ flexShrink: 0, marginLeft: "auto" }}
+              >
+                <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            )}
+          </Link>
         </div>
       </aside>
 
-      {/* Main content */}
-      <div style={{
-        flex: 1, marginLeft: collapsed ? "72px" : "260px",
-        transition: "margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1)",
-        display: "flex", flexDirection: "column", minHeight: "100vh",
-      }}>
-        {/* Top bar */}
-        <header style={{
-          display: "flex", alignItems: "center", justifyContent: "flex-end",
-          padding: "16px 32px", borderBottom: "1px solid var(--border)",
-          background: "var(--bg-surface)", gap: "16px", position: "sticky", top: 0, zIndex: 40,
-        }}>
-          <button 
-            className="btn btn-ghost" 
-            style={{ padding: "8px", borderRadius: "var(--radius-sm)", position: "relative" }}
+      <div
+        style={{
+          flex: 1,
+          marginLeft: collapsed ? "72px" : "260px",
+          transition: "margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1)",
+          display: "flex",
+          flexDirection: "column",
+          minHeight: "100vh",
+        }}
+      >
+        <header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            padding: "16px 32px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg-surface)",
+            gap: "16px",
+            position: "sticky",
+            top: 0,
+            zIndex: 40,
+          }}
+        >
+          <button
+            className="btn btn-ghost"
+            style={{ padding: "8px", borderRadius: "var(--radius-sm)" }}
             onClick={async () => {
               await supabase.auth.signOut();
               router.push("/auth/login");
             }}
             title="Sign Out"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--text-secondary)"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
           </button>
+
           <button
             className="btn btn-primary"
             style={{ padding: "8px 20px", fontSize: "13px" }}
             onClick={() => setIsCreateCampaignOpen(true)}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M12 5v14M5 12h14" />
             </svg>
             New Campaign
