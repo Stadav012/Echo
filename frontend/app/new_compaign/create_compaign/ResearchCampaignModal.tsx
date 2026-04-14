@@ -27,6 +27,7 @@ export default function ResearchCampaignModal({
   isOpen,
   onClose,
 }: ResearchCampaignModalProps) {
+  const router = useRouter();
   const [questionBankMode, setQuestionBankMode] = useState<"text" | "file">(
     "text"
   );
@@ -128,7 +129,7 @@ export default function ResearchCampaignModal({
         );
       }
 
-      const { error: insertError } = await supabase
+      const { data: insertedResearch, error: insertError } = await supabase
         .from("research_campaigns")
         .insert({
           user_id: userId,
@@ -152,7 +153,9 @@ export default function ResearchCampaignModal({
           contact_list_file_type: contactListFile.type || "text/csv",
           timeline_start: new Date(startAt).toISOString(),
           timeline_end: new Date(endAt).toISOString(),
-        });
+        })
+        .select("id")
+        .single();
 
       if (insertError) {
         throw new Error(
