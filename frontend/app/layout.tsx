@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Echo — AI Research Interview Platform",
   description:
-    "Automate qualitative user research interviews with AI-powered outbound phone calls. Create campaigns, conduct interviews, and analyze transcripts at scale.",
+    "Automate qualitative user research interviews with AI-powered outbound phone calls. Create campaigns, conduct interviews, and analyze transcripts at scale!",
   keywords: ["AI", "research", "interviews", "qualitative", "voice", "surveys"],
 };
 
