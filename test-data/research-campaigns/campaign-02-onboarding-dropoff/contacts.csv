@@ -1,0 +1,9 @@
+name,phone,email,age,occupation,segment,timezone
+Emma Brooks,+14155550201,emma.brooks@example.com,27,Customer Success Associate,Startup,America/Chicago
+Noah Kim,+14155550202,noah.kim@example.com,30,IT Administrator,SMB Retail,America/New_York
+Fatima Ali,+14155550203,fatima.ali@example.com,32,Operations Analyst,Logistics,Europe/London
+Mateo Ruiz,+14155550204,mateo.ruiz@example.com,28,Marketing Coordinator,eCommerce,America/Los_Angeles
+Grace Chen,+14155550205,grace.chen@example.com,35,RevOps Manager,B2B SaaS,America/New_York
+Ibrahim Yusuf,+14155550206,ibrahim.yusuf@example.com,26,Founder,Early-stage SaaS,Africa/Lagos
+Sophie Martin,+14155550207,sophie.martin@example.com,31,Product Specialist,EdTech,Europe/Paris
+Diego Torres,+14155550208,diego.torres@example.com,29,Sales Ops Analyst,Fintech,America/Mexico_City

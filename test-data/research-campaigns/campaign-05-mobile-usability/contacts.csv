@@ -1,0 +1,9 @@
+name,phone,email,age,occupation,segment,timezone
+Harper Lee,+14155550501,harper.lee@example.com,28,Field Sales Rep,Telecom,America/Chicago
+Arjun Das,+14155550502,arjun.das@example.com,34,Site Operations Lead,Logistics,Asia/Kolkata
+Maya Ortiz,+14155550503,maya.ortiz@example.com,31,Account Manager,SaaS,America/Los_Angeles
+Ethan Cole,+14155550504,ethan.cole@example.com,39,Regional Supervisor,Facilities,America/New_York
+Linh Pham,+14155550505,linh.pham@example.com,29,Implementation Specialist,HealthTech,Asia/Ho_Chi_Minh
+Sara Adebayo,+14155550506,sara.adebayo@example.com,33,Customer Trainer,EdTech,Africa/Lagos
+Jonas Keller,+14155550507,jonas.keller@example.com,42,Service Manager,Industrial Tech,Europe/Berlin
+Camila Diaz,+14155550508,camila.diaz@example.com,30,Solutions Consultant,Fintech,America/Bogota

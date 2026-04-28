@@ -5,6 +5,15 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+interface RefinementSummary {
+  improved_questions?: string[];
+  key_themes?: string[];
+  notes?: string;
+  feedback_1?: string;
+  feedback_2?: string;
+  completed_at?: string;
+}
+
 interface ResearchCampaign {
   id: string;
   user_id: string;
@@ -20,6 +29,7 @@ interface ResearchCampaign {
   timeline_end: string;
   created_at: string;
   updated_at: string;
+  refinement_summary: RefinementSummary | null;
 }
 
 interface Transcript {
@@ -306,9 +316,17 @@ export default function ResearchDetailPage() {
       <div className="card" style={{ padding: "24px 28px" }}>
         <div className="flex-between" style={{ gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
               <h1 className="page-title" style={{ margin: 0 }}>{research.title}</h1>
               <Badge value={research.status} />
+              {research.refinement_summary && (
+                <span className="badge badge-success" title="AI refinement complete">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Refined
+                </span>
+              )}
             </div>
             <p className="text-secondary" style={{ marginBottom: 14, maxWidth: "65ch", lineHeight: 1.6 }}>
               {research.description}
@@ -336,6 +354,23 @@ export default function ResearchDetailPage() {
                 <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
               ))}
             </select>
+            <button
+              type="button"
+              className={research.refinement_summary ? "btn btn-secondary" : "btn btn-primary"}
+              style={{ padding: "8px 14px", fontSize: 13 }}
+              onClick={() => {
+                const query = new URLSearchParams({
+                  title: research.title,
+                  researchId: research.id,
+                });
+                router.push(`/new_compaign/compaign_followup?${query.toString()}`);
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+              </svg>
+              {research.refinement_summary ? "Re-run refinement" : "Refine with AI"}
+            </button>
           </div>
         </div>
       </div>
@@ -377,6 +412,71 @@ export default function ResearchDetailPage() {
       </div>
 
       {/* ── OVERVIEW ──────────────────────────────────────────────────── */}
+      {tab === "overview" && research.refinement_summary && (
+        <div className="card" style={{ padding: "22px 24px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <h3 className="section-title" style={{ margin: 0 }}>AI Refinement</h3>
+              {research.refinement_summary.completed_at && (
+                <span className="text-muted text-xs">
+                  · {fmt.date(research.refinement_summary.completed_at)}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: "6px 10px", fontSize: 12 }}
+              onClick={() => {
+                const query = new URLSearchParams({ title: research.title, researchId: research.id });
+                router.push(`/new_compaign/compaign_followup?${query.toString()}`);
+              }}
+            >
+              Re-run
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div>
+              <div className="form-label">Improved questions</div>
+              {research.refinement_summary.improved_questions && research.refinement_summary.improved_questions.length > 0 ? (
+                <ol style={{ paddingLeft: 18, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {research.refinement_summary.improved_questions.map((q, i) => (
+                    <li key={i} className="text-secondary" style={{ fontSize: 13, lineHeight: 1.55 }}>{q}</li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="text-muted" style={{ fontSize: 13 }}>None.</p>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div>
+                <div className="form-label">Key themes</div>
+                {research.refinement_summary.key_themes && research.refinement_summary.key_themes.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {research.refinement_summary.key_themes.map((t, i) => (
+                      <span key={i} className="badge badge-info">{t}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted" style={{ fontSize: 13 }}>None.</p>
+                )}
+              </div>
+
+              {research.refinement_summary.notes && (
+                <div>
+                  <div className="form-label">Notes</div>
+                  <p className="text-secondary" style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", margin: 0 }}>
+                    {research.refinement_summary.notes}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {tab === "overview" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
 
