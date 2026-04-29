@@ -145,7 +145,7 @@ export default function CampaignsPage() {
             Manage and monitor all your research interview campaigns
           </p>
         </div>
-        <button
+        {/* <button
           className="btn btn-primary"
           style={{ padding: "10px 24px", fontSize: "14px" }}
           onClick={() => setIsCreateCampaignOpen(true)}
@@ -153,8 +153,8 @@ export default function CampaignsPage() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          New Campaign
-        </button>
+          New Campaign **
+        </button> */}
       </div>
 
       {/* Filters */}
@@ -207,7 +207,7 @@ export default function CampaignsPage() {
                 style={{ padding: "10px 24px", fontSize: "14px" }}
                 onClick={() => setIsCreateCampaignOpen(true)}
               >
-                + New Campaign
+                Create New Campaign 
               </button>
             )}
           </div>
