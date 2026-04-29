@@ -1,5 +1,5 @@
 import asyncio
-import itertools
+import json as _json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,9 +9,11 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     TextFrame,
     TranscriptionFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -39,39 +41,51 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DUMMY_RESPONSES_PATH = Path(__file__).parent / "dummy_responses.txt"
 TRANSCRIPTS_DIR = Path(__file__).parent / "transcripts"
+FALLBACK_RESPONSE = "I'm sorry, I didn't receive a response. Could you repeat that?"
 
 
 # ---------------------------------------------------------------------------
-# Raw PCM serializer — browser sends/receives plain binary, no protobuf
+# Serializer — raw PCM audio + JSON control messages to the browser
 # ---------------------------------------------------------------------------
 
 class RawAudioSerializer(FrameSerializer):
-    """Pass raw PCM bytes straight through in both directions."""
+    """
+    Binary:  OutputAudioRawFrame  → raw PCM bytes  (browser plays these)
+    Text:    InterruptionFrame    → {"type":"interrupt"}  (browser flushes queue)
+    Receive: raw bytes            → InputAudioRawFrame    (mic audio from browser)
+    """
 
-    async def serialize(self, frame) -> bytes | None:
+    async def serialize(self, frame) -> bytes | str | None:
         if isinstance(frame, OutputAudioRawFrame):
             return frame.audio
+        if isinstance(frame, InterruptionFrame):
+            return _json.dumps({"type": "interrupt"})
         return None
 
-    async def deserialize(self, data) -> InputAudioRawFrame | None:
+    async def deserialize(self, data) -> object | None:
         if isinstance(data, (bytes, bytearray)):
             return InputAudioRawFrame(
                 audio=bytes(data),
                 sample_rate=16000,
                 num_channels=1,
             )
+        # Browser detected speech locally and is telling us to stop TTS now
+        if isinstance(data, str):
+            try:
+                msg = _json.loads(data)
+                if msg.get("type") == "user_speaking":
+                    return InterruptionFrame()
+            except (ValueError, KeyError):
+                pass
         return None
 
 
 # ---------------------------------------------------------------------------
-# Debug processor — logs every 50th audio frame so we can confirm mic → server
+# Debug processor
 # ---------------------------------------------------------------------------
 
 class AudioDebugger(FrameProcessor):
-    """Logs periodically so we can confirm audio is arriving from the browser."""
-
     def __init__(self, session_id: str) -> None:
         super().__init__()
         self._session_id = session_id
@@ -84,9 +98,7 @@ class AudioDebugger(FrameProcessor):
             if self._count % 50 == 0:
                 logger.info(
                     "[%s] Audio from browser: frame #%d (%d bytes)",
-                    self._session_id,
-                    self._count,
-                    len(frame.audio),
+                    self._session_id, self._count, len(frame.audio),
                 )
         await self.push_frame(frame, direction)
 
@@ -94,14 +106,6 @@ class AudioDebugger(FrameProcessor):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _load_dummy_lines() -> list[str]:
-    with open(DUMMY_RESPONSES_PATH, "r") as f:
-        lines = [l.strip() for l in f if l.strip()]
-    if not lines:
-        raise RuntimeError(f"{DUMMY_RESPONSES_PATH} is empty")
-    return lines
-
 
 def _transcript_path(session_id: str) -> Path:
     TRANSCRIPTS_DIR.mkdir(exist_ok=True)
@@ -115,41 +119,96 @@ def _write_line(path: Path, role: str, text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Dummy responder (replaces LLM for testing)
+# Backend relay — FSM states: IDLE / PROCESSING
 # ---------------------------------------------------------------------------
 
-class DummyTextResponder(FrameProcessor):
+class BackendRelayProcessor(FrameProcessor):
     """
-    Intercepts TranscriptionFrames (customer speech), writes them to a
-    per-session transcript file, then replies with the next line from
-    dummy_responses.txt as a TextFrame for Cartesia TTS to synthesise.
+    Finite-state relay between the customer and the external backend (LLM).
+
+    IDLE        — waiting for the customer to speak
+    PROCESSING  — a TranscriptionFrame has been sent to the backend; waiting
+                  for a response TextFrame to push to TTS
+
+    Transitions:
+      IDLE       → PROCESSING  on TranscriptionFrame
+      PROCESSING → IDLE        on response received (or timeout / fallback)
+      PROCESSING → IDLE        on InterruptionFrame (customer barged in)
+        ↳ cancels the in-flight backend request so we don't speak over them
+
+    When interrupted:
+      - The pending _respond task is cancelled immediately.
+      - InterruptionFrame is forwarded downstream so CartesiaTTSService and
+        the transport output also stop and flush.
     """
+
+    _STATE_IDLE       = "idle"
+    _STATE_PROCESSING = "processing"
 
     def __init__(
         self,
         session_id: str,
-        dummy_lines: list[str],
         transcript_file: Path,
+        manager: "SessionManager",
     ) -> None:
         super().__init__()
-        self._session_id = session_id
-        self._responses = itertools.cycle(dummy_lines[1:] or dummy_lines)
-        self._transcript_file = transcript_file
+        self._session_id    = session_id
+        self._transcript    = transcript_file
+        self._manager       = manager
+        self._state         = self._STATE_IDLE
+        self._pending: asyncio.Task | None = None
 
     async def process_frame(self, frame: object, direction: FrameDirection) -> None:  # type: ignore[override]
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
+        # ── Barge-in: customer started speaking ──────────────────────────
+        if isinstance(frame, (InterruptionFrame, VADUserStartedSpeakingFrame)):
+            if self._state == self._STATE_PROCESSING and self._pending:
+                self._pending.cancel()
+                logger.info("[%s] INTERRUPTED — response cancelled", self._session_id)
+            self._state = self._STATE_IDLE
+            # Forward so TTS + transport output also flush
+            await self.push_frame(frame, direction)
+
+        # ── Customer finished speaking: new transcription ─────────────────
+        elif isinstance(frame, TranscriptionFrame) and frame.text.strip():
             text = frame.text.strip()
             logger.info("[%s] CUSTOMER SAID: %s", self._session_id, text)
-            await asyncio.to_thread(_write_line, self._transcript_file, "customer", text)
+            await asyncio.to_thread(_write_line, self._transcript, "customer", text)
 
-            response = next(self._responses)
-            logger.info("[%s] AGENT REPLIES: %s", self._session_id, response)
-            await asyncio.to_thread(_write_line, self._transcript_file, "agent", response)
-            await self.push_frame(TextFrame(response))
+            self._state   = self._STATE_PROCESSING
+            self._pending = asyncio.create_task(self._respond(text))
+
         else:
             await self.push_frame(frame, direction)
+
+    async def _respond(self, text: str) -> None:
+        try:
+            sent = await self._manager.send_transcription_to_agent(self._session_id, text)
+            if sent:
+                response = await self._manager.get_agent_response(
+                    self._session_id, timeout=10.0
+                )
+                if response is None:
+                    logger.warning("[%s] Backend timed out", self._session_id)
+                    response = FALLBACK_RESPONSE
+            else:
+                logger.warning("[%s] No backend connected", self._session_id)
+                response = FALLBACK_RESPONSE
+
+            # Brief human-like pause before speaking — also a cancellation point
+            # so a barge-in during this window still cancels the response.
+            await asyncio.sleep(0.4)
+
+            logger.info("[%s] AGENT REPLIES: %s", self._session_id, response)
+            await asyncio.to_thread(_write_line, self._transcript, "agent", response)
+            await self.push_frame(TextFrame(response))
+
+        except asyncio.CancelledError:
+            logger.info("[%s] _respond task cancelled (barge-in)", self._session_id)
+            raise
+        finally:
+            self._state = self._STATE_IDLE
 
 
 # ---------------------------------------------------------------------------
@@ -161,13 +220,10 @@ async def create_pipeline_task(
     websocket: object,
     manager: "SessionManager",
 ) -> PipelineTask:
-    dummy_lines = await asyncio.to_thread(_load_dummy_lines)
     transcript_file = _transcript_path(session.session_id)
 
     await asyncio.to_thread(
-        _write_line,
-        transcript_file,
-        "system",
+        _write_line, transcript_file, "system",
         f"Session started — customer_id={session.customer_id} name={session.customer_name}",
     )
 
@@ -199,7 +255,6 @@ async def create_pipeline_task(
         encoding="pcm_s16le",
     )
 
-    # Lower VAD thresholds so regular mic volume is detected
     vad = VADProcessor(
         vad_analyzer=SileroVADAnalyzer(
             params=VADParams(
@@ -211,16 +266,13 @@ async def create_pipeline_task(
         )
     )
 
-    audio_debugger = AudioDebugger(session.session_id)
-    responder = DummyTextResponder(session.session_id, dummy_lines, transcript_file)
-
     pipeline = Pipeline(
         [
             transport.input(),
-            audio_debugger,   # confirms mic audio is arriving
+            AudioDebugger(session.session_id),
             vad,
             stt,
-            responder,
+            BackendRelayProcessor(session.session_id, transcript_file, manager),
             tts,
             transport.output(),
         ]
@@ -235,13 +287,6 @@ async def create_pipeline_task(
     )
 
     manager.register_pipeline(session.session_id, task)
-
-    # Send the opening greeting immediately
-    opening = dummy_lines[0]
-    logger.info("[%s] AGENT (greeting): %s", session.session_id, opening)
-    await asyncio.to_thread(_write_line, transcript_file, "agent", opening)
-    await task.queue_frames([TextFrame(opening)])
-
     return task
 
 

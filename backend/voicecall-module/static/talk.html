@@ -248,6 +248,26 @@
   let pendingAudio  = [];
   let audioReady    = false;
 
+  // All scheduled AudioBufferSourceNodes — needed so we can stop them on interrupt
+  let activeSources = [];
+
+  // After a local barge-in flush, suppress residual TTS frames from the server
+  // for this many ms (they were already in-flight before the server got our signal).
+  const SUPPRESS_MS = 700;
+  let suppressUntil = 0;
+
+  // ── Barge-in tuning ────────────────────────────────────────────────────────
+  // Each ScriptProcessor frame is ~256ms (4096 samples @ 16kHz).
+  // BARGE_IN_RMS  : minimum energy to count as speech (0 = silent, 1 = clipping).
+  //                 Raise if cutting on background noise; lower if missing soft speech.
+  // BARGE_IN_FRAMES: consecutive frames that must exceed the threshold before we cut.
+  //                 1 = ~256ms (hair-trigger), 2 = ~512ms (recommended), 3 = ~768ms (conservative).
+  const BARGE_IN_RMS    = 0.02;
+  const BARGE_IN_FRAMES = 2;
+
+  let speechFrameCount  = 0;   // consecutive frames above threshold
+  let bargingInCooldown = false;
+
   // ---- UI helpers ----
   function setUIState(state) {
     viewConnecting.style.display   = 'none';
@@ -317,6 +337,20 @@
     return out;
   }
 
+  // Stop all buffered/playing agent audio immediately.
+  // Sets a suppression window so residual TTS frames from the server are dropped.
+  function flushAudio() {
+    for (const src of activeSources) {
+      try { src.stop(); } catch (_) {}
+    }
+    activeSources    = [];
+    pendingAudio     = [];
+    nextStartTime    = 0;
+    agentSpeaking    = false;
+    suppressUntil    = Date.now() + SUPPRESS_MS;
+    speechFrameCount = 0;
+  }
+
   function playFloat32(float32) {
     // Agent TTS is 16 kHz PCM. Create the buffer at 16000 so the browser
     // resamples to its native rate automatically.
@@ -331,9 +365,10 @@
     src.start(nextStartTime);
     nextStartTime += buf.duration;
 
+    activeSources.push(src);
     src.onended = () => {
-      // If nothing queued after this, switch back to listening state
-      if (nextStartTime <= audioCtx.currentTime + 0.05) {
+      activeSources = activeSources.filter(s => s !== src);
+      if (activeSources.length === 0 && nextStartTime <= audioCtx.currentTime + 0.05) {
         agentSpeaking = false;
         setUIState('listening');
       }
@@ -342,10 +377,12 @@
 
   function handleIncomingAudio(arrayBuffer) {
     if (!audioReady) {
-      // Store a copy — the original buffer may be reused by the browser
       pendingAudio.push(arrayBuffer.slice(0));
       return;
     }
+    // Drop residual TTS frames that arrived after a barge-in flush
+    if (Date.now() < suppressUntil) return;
+
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const float32 = pcmToFloat32(arrayBuffer);
     if (!agentSpeaking) {
@@ -397,7 +434,36 @@
     scriptProc.onaudioprocess = (e) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       const float32 = e.inputBuffer.getChannelData(0);
-      const int16   = new Int16Array(float32.length);
+
+      // ── Local barge-in detection ─────────────────────────────────────
+      // Only active while the agent is speaking and we're not in cooldown.
+      // Requires BARGE_IN_FRAMES consecutive frames above BARGE_IN_RMS
+      // (~512ms of sustained speech) before cutting, so brief sounds like
+      // coughs, taps, or background noise don't interrupt.
+      if (agentSpeaking && !bargingInCooldown) {
+        let sum = 0;
+        for (let i = 0; i < float32.length; i++) sum += float32[i] * float32[i];
+        const rms = Math.sqrt(sum / float32.length);
+
+        if (rms > BARGE_IN_RMS) {
+          speechFrameCount++;
+          if (speechFrameCount >= BARGE_IN_FRAMES) {
+            flushAudio();                    // also resets speechFrameCount
+            setUIState('listening');
+            ws.send(JSON.stringify({ type: 'user_speaking' }));
+            bargingInCooldown = true;
+            setTimeout(() => { bargingInCooldown = false; }, 1200);
+          }
+        } else {
+          // Sound dropped below threshold — reset, must sustain again
+          speechFrameCount = 0;
+        }
+      } else if (!agentSpeaking) {
+        speechFrameCount = 0;
+      }
+
+      // ── Send PCM to server ───────────────────────────────────────────
+      const int16 = new Int16Array(float32.length);
       for (let i = 0; i < float32.length; i++) {
         const s  = Math.max(-1, Math.min(1, float32[i]));
         int16[i] = s < 0 ? s * 32768 : s * 32767;
@@ -423,7 +489,11 @@
       if (typeof event.data === 'string') {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === 'transcript') {
+          if (msg.type === 'interrupt') {
+            // Server detected barge-in — stop agent audio immediately
+            flushAudio();
+            setUIState('listening');
+          } else if (msg.type === 'transcript') {
             addBubble(msg.role, msg.text);
           } else if (msg.type === 'session_end') {
             cleanup(); setUIState('done');

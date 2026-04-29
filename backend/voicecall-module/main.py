@@ -109,6 +109,44 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
         session_manager.remove_pipeline(session_id)
 
 
+@app.websocket("/agent/{session_id}")
+async def agent_ws_endpoint(websocket: WebSocket, session_id: str) -> None:
+    """
+    WebSocket for the external backend (the one that has the LLM).
+
+    Flow:
+      1. Backend connects here with X-API-Key as a query param or first message.
+      2. Server sends: { "type": "transcription", "text": "..." } for each
+         customer utterance.
+      3. Backend replies: { "type": "response", "text": "..." } with the
+         LLM-generated reply, which gets spoken via Cartesia TTS.
+    """
+    x_api_key = websocket.query_params.get("api_key", "")
+    if x_api_key != API_KEY:
+        await websocket.close(code=4001)
+        return
+
+    session = await session_manager.get_session(session_id)
+    if session is None or session.status in ("expired", "completed"):
+        await websocket.close(code=4004)
+        return
+
+    await websocket.accept()
+    await session_manager.connect_agent(session_id, websocket)
+    logger.info("Agent WS connected for session %s", session_id)
+
+    try:
+        async for msg in websocket.iter_json():
+            if msg.get("type") == "response" and msg.get("text"):
+                session_manager.put_agent_response(session_id, msg["text"])
+    except WebSocketDisconnect:
+        logger.info("Agent WS disconnected for session %s", session_id)
+    except Exception as exc:
+        logger.exception("Agent WS error for session %s: %s", session_id, exc)
+    finally:
+        session_manager.disconnect_agent(session_id)
+
+
 @app.get("/sessions/{session_id}", response_model=SessionStatusResponse)
 async def get_session_status(
     session_id: str,

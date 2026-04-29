@@ -34,6 +34,9 @@ class SessionManager:
         self._pipelines: dict[str, Any] = {}
         self._redis: Any = None
         self._sweep_task: asyncio.Task | None = None
+        # Agent WebSocket relay (external backend ↔ pipeline)
+        self._agent_ws: dict[str, Any] = {}
+        self._agent_queues: dict[str, asyncio.Queue] = {}
 
     async def startup(self) -> None:
         if REDIS_URL:
@@ -170,6 +173,58 @@ class SessionManager:
                         await asyncio.sleep(delay)
 
         logger.error("All callback attempts failed for session %s", session_id)
+
+    # ------------------------------------------------------------------
+    # Agent WebSocket relay
+    # ------------------------------------------------------------------
+
+    async def connect_agent(self, session_id: str, websocket: Any) -> asyncio.Queue:
+        """Register the external backend's WebSocket. Returns a queue the
+        pipeline reads from to get LLM responses."""
+        q: asyncio.Queue = asyncio.Queue()
+        self._agent_ws[session_id] = websocket
+        self._agent_queues[session_id] = q
+        logger.info("Agent backend connected for session %s", session_id)
+        return q
+
+    def disconnect_agent(self, session_id: str) -> None:
+        self._agent_ws.pop(session_id, None)
+        self._agent_queues.pop(session_id, None)
+        logger.info("Agent backend disconnected for session %s", session_id)
+
+    def has_agent(self, session_id: str) -> bool:
+        return session_id in self._agent_ws
+
+    async def send_transcription_to_agent(self, session_id: str, text: str) -> bool:
+        """Push a customer transcription to the external backend. Returns False
+        if no backend is connected."""
+        ws = self._agent_ws.get(session_id)
+        if ws is None:
+            return False
+        try:
+            await ws.send_json({"type": "transcription", "text": text})
+            return True
+        except Exception as exc:
+            logger.warning("Failed to send transcription to agent for %s: %s", session_id, exc)
+            return False
+
+    async def get_agent_response(self, session_id: str, timeout: float = 10.0) -> str | None:
+        """Wait for the external backend to push an LLM response. Returns None
+        on timeout or if no backend is connected."""
+        q = self._agent_queues.get(session_id)
+        if q is None:
+            return None
+        try:
+            return await asyncio.wait_for(q.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("Agent response timeout for session %s", session_id)
+            return None
+
+    def put_agent_response(self, session_id: str, text: str) -> None:
+        """Called by the /agent WebSocket handler when a response arrives."""
+        q = self._agent_queues.get(session_id)
+        if q:
+            q.put_nowait(text)
 
     # ------------------------------------------------------------------
     # Pipeline tracking
