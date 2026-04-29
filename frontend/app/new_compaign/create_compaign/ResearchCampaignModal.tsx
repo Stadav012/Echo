@@ -4,9 +4,19 @@ import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
+import { parseContactsCsv, type SkippedRow } from "@/lib/contacts/csv";
+
 type ResearchCampaignModalProps = {
   isOpen: boolean;
   onClose: () => void;
+};
+
+type ImportSummary = {
+  imported: number;
+  skipped: SkippedRow[];
+  pdfTruncated: boolean;
+  pdfFailed: string | null;
+  contactInsertError: string | null;
 };
 
 const initialState = {
@@ -45,6 +55,8 @@ export default function ResearchCampaignModal({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showRefinePrompt, setShowRefinePrompt] = useState(false);
   const [createdResearchId, setCreatedResearchId] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [showSkippedDetails, setShowSkippedDetails] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -69,6 +81,8 @@ export default function ResearchCampaignModal({
     setSuccessMessage(null);
     setShowRefinePrompt(false);
     setCreatedResearchId(null);
+    setImportSummary(null);
+    setShowSkippedDetails(false);
     onClose();
   };
 
@@ -77,6 +91,8 @@ export default function ResearchCampaignModal({
 
     setErrorMessage(null);
     setSuccessMessage(null);
+    setImportSummary(null);
+    setShowSkippedDetails(false);
     setIsSubmitting(true);
 
     try {
@@ -95,6 +111,41 @@ export default function ResearchCampaignModal({
 
       if (questionBankMode === "file" && !questionBankFile) {
         throw new Error("Please upload a question bank PDF file.");
+      }
+
+      const csvParsed = await parseContactsCsv(contactListFile);
+      if (csvParsed.rows.length === 0) {
+        throw new Error(
+          "Contact list CSV had no valid rows. Make sure each row includes a name and a phone number."
+        );
+      }
+
+      let extractedQuestionBankText: string | null = null;
+      let pdfTruncated = false;
+      let pdfFailed: string | null = null;
+      if (questionBankMode === "file" && questionBankFile) {
+        try {
+          const form = new FormData();
+          form.append("file", questionBankFile);
+          const res = await fetch("/api/extract/pdf", {
+            method: "POST",
+            body: form,
+          });
+          if (!res.ok) {
+            const body = (await res.json().catch(() => null)) as
+              | { error?: string }
+              | null;
+            throw new Error(body?.error || `PDF extraction failed (${res.status}).`);
+          }
+          const body = (await res.json()) as {
+            text: string;
+            truncated: boolean;
+          };
+          extractedQuestionBankText = body.text || null;
+          pdfTruncated = Boolean(body.truncated);
+        } catch (error) {
+          pdfFailed = error instanceof Error ? error.message : "PDF extraction failed.";
+        }
       }
 
       const userId = session.user.id;
@@ -129,6 +180,11 @@ export default function ResearchCampaignModal({
         );
       }
 
+      const questionBankTextValue =
+        questionBankMode === "text"
+          ? questionBankText
+          : extractedQuestionBankText;
+
       const { data: insertedResearch, error: insertError } = await supabase
         .from("research_campaigns")
         .insert({
@@ -136,8 +192,7 @@ export default function ResearchCampaignModal({
           title,
           description,
           question_bank_mode: questionBankMode,
-          question_bank_text:
-            questionBankMode === "text" ? questionBankText : null,
+          question_bank_text: questionBankTextValue,
           question_bank_file_name:
             questionBankMode === "file" && questionBankFile
               ? questionBankFile.name
@@ -163,8 +218,45 @@ export default function ResearchCampaignModal({
         );
       }
 
-      setSuccessMessage("Research campaign created successfully.");
-      setCreatedResearchId(insertedResearch?.id ?? null);
+      const researchId = insertedResearch?.id;
+      let contactInsertError: string | null = null;
+      if (researchId) {
+        const { error: contactsErr } = await supabase
+          .from("contact_list")
+          .insert(
+            csvParsed.rows.map((r) => ({
+              research_campaign_id: researchId,
+              name: r.name,
+              phone: r.phone,
+              email: r.email,
+              age: r.age,
+              occupation: r.occupation,
+              metadata: r.metadata,
+            }))
+          );
+        if (contactsErr) {
+          contactInsertError = contactsErr.message;
+        }
+      }
+
+      const summary: ImportSummary = {
+        imported: contactInsertError ? 0 : csvParsed.rows.length,
+        skipped: csvParsed.skipped,
+        pdfTruncated,
+        pdfFailed,
+        contactInsertError,
+      };
+      setImportSummary(summary);
+      setSuccessMessage(
+        contactInsertError
+          ? `Campaign created. ${csvParsed.rows.length} contacts could not be imported.`
+          : `Campaign created. Imported ${csvParsed.rows.length} contacts${
+              csvParsed.skipped.length > 0
+                ? `, ${csvParsed.skipped.length} skipped.`
+                : "."
+            }`
+      );
+      setCreatedResearchId(researchId ?? null);
       setShowRefinePrompt(true);
     } catch (error) {
       const fallbackMessage =
@@ -467,6 +559,81 @@ export default function ResearchCampaignModal({
             </div>
           )}
 
+          {importSummary && !errorMessage && (
+            <div
+              style={{
+                marginTop: "10px",
+                padding: "10px 12px",
+                borderRadius: "var(--radius-md)",
+                fontSize: "12px",
+                border: "1px solid var(--border-light)",
+                background: "var(--bg-input)",
+                color: "var(--text-secondary)",
+                lineHeight: 1.5,
+              }}
+            >
+              <div>
+                <strong>Imported:</strong> {importSummary.imported} contacts
+                {importSummary.skipped.length > 0 && (
+                  <>
+                    {" "}
+                    <strong>Skipped:</strong> {importSummary.skipped.length}
+                  </>
+                )}
+              </div>
+              {importSummary.contactInsertError && (
+                <div style={{ color: "#991B1B", marginTop: "4px" }}>
+                  Contact insert failed: {importSummary.contactInsertError}
+                </div>
+              )}
+              {importSummary.pdfFailed && (
+                <div style={{ color: "#92400E", marginTop: "4px" }}>
+                  Question bank PDF could not be extracted ({importSummary.pdfFailed}). The campaign was saved without extracted text.
+                </div>
+              )}
+              {importSummary.pdfTruncated && (
+                <div style={{ color: "#92400E", marginTop: "4px" }}>
+                  PDF was very long; extracted text was truncated.
+                </div>
+              )}
+              {importSummary.skipped.length > 0 && (
+                <div style={{ marginTop: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowSkippedDetails((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      color: "var(--primary-dark)",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {showSkippedDetails
+                      ? "Hide skipped row reasons"
+                      : "Show skipped row reasons"}
+                  </button>
+                  {showSkippedDetails && (
+                    <ul style={{ margin: "6px 0 0 16px", padding: 0 }}>
+                      {importSummary.skipped.slice(0, 20).map((s) => (
+                        <li key={s.row} style={{ marginBottom: "2px" }}>
+                          Row {s.row}: {s.reason}
+                        </li>
+                      ))}
+                      {importSummary.skipped.length > 20 && (
+                        <li>
+                          ...and {importSummary.skipped.length - 20} more.
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div
             style={{
               display: "flex",
@@ -539,10 +706,12 @@ export default function ResearchCampaignModal({
               <button
                 type="button"
                 className="btn btn-primary"
+                disabled={!createdResearchId}
                 onClick={() => {
+                  if (!createdResearchId) return;
                   const query = new URLSearchParams({
                     title,
-                    ...(createdResearchId ? { researchId: createdResearchId } : {}),
+                    researchId: createdResearchId,
                   });
                   handleClose();
                   router.push(`/new_compaign/compaign_followup?${query.toString()}`);

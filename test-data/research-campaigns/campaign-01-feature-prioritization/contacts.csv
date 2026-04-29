@@ -1,0 +1,9 @@
+name,phone,email,age,occupation,segment,timezone
+Jordan Hayes,+14155550101,jordan.hayes@example.com,34,Engineering Manager,B2B SaaS,America/Los_Angeles
+Mina Patel,+14155550102,mina.patel@example.com,31,Product Operations Lead,B2B SaaS,America/Los_Angeles
+Chris Okafor,+14155550103,chris.okafor@example.com,38,Director of Product,B2B SaaS,America/New_York
+Alyssa Grant,+14155550104,alyssa.grant@example.com,29,Program Manager,Fintech,America/Chicago
+Bruno Silva,+14155550105,bruno.silva@example.com,42,VP Engineering,Dev Tools,America/New_York
+Samir Nadeem,+14155550106,samir.nadeem@example.com,36,Technical Product Manager,HealthTech,America/Denver
+Priya Raman,+14155550107,priya.raman@example.com,33,Operations Manager,HR Tech,America/New_York
+Lena Vogel,+14155550108,lena.vogel@example.com,40,Chief of Staff,SaaS Platform,Europe/Berlin
