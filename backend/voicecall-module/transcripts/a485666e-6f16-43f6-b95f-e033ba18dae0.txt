@@ -1,0 +1,32 @@
+[2026-04-29T02:01:57Z] SYSTEM: Session started — customer_id=test_001 name=Tendai
+[2026-04-29T02:01:57Z] AGENT: Hello! Thanks for reaching out. How can I help you today?
+[2026-04-29T02:02:08Z] CUSTOMER: How are you? How are you doing?
+[2026-04-29T02:02:08Z] AGENT: Sure, I can help you with that. Could you give me a bit more detail?
+[2026-04-29T02:02:16Z] CUSTOMER: Don't understand what you want me to help with.
+[2026-04-29T02:02:16Z] AGENT: Got it. Let me look into that for you right now.
+[2026-04-29T02:02:23Z] CUSTOMER: Port. Port. Port. Port.
+[2026-04-29T02:02:23Z] AGENT: I understand. That sounds frustrating — let me sort this out.
+[2026-04-29T02:02:31Z] CUSTOMER: K. I sent the voice.
+[2026-04-29T02:02:31Z] AGENT: Just to confirm, you said you'd like to proceed with that option?
+[2026-04-29T02:02:39Z] CUSTOMER: Okay.
+[2026-04-29T02:02:39Z] AGENT: Great. I've noted that down on your account.
+[2026-04-29T02:02:50Z] CUSTOMER: Yes.
+[2026-04-29T02:02:50Z] AGENT: Is there anything else you'd like to go over while I have you on the line?
+[2026-04-29T02:02:58Z] CUSTOMER: Okay. Tell me about how this TTS is working.
+[2026-04-29T02:02:58Z] AGENT: No problem at all. We can definitely take care of that for you.
+[2026-04-29T02:03:10Z] CUSTOMER: Okay. I think I'm okay with everything.
+[2026-04-29T02:03:10Z] AGENT: That should be resolved within 24 hours. You'll receive a confirmation message shortly.
+[2026-04-29T02:03:18Z] CUSTOMER: Okay. That's understandable.
+[2026-04-29T02:03:18Z] AGENT: Thank you so much for your patience. Is there anything else I can help you with today?
+[2026-04-29T02:03:29Z] CUSTOMER: Okay. Everything looks good on my end.
+[2026-04-29T02:03:29Z] AGENT: Perfect. I'll flag this for the relevant team and they'll follow up with you directly.
+[2026-04-29T02:03:30Z] CUSTOMER: So what are you thinking?
+[2026-04-29T02:03:30Z] AGENT: Absolutely. Your security is our top priority and we take these matters very seriously.
+[2026-04-29T02:03:43Z] CUSTOMER: Why is it saying total not?
+[2026-04-29T02:03:43Z] AGENT: I've updated your details successfully. Everything looks good on our end.
+[2026-04-29T02:03:57Z] CUSTOMER: Okay. Cool.
+[2026-04-29T02:03:57Z] AGENT: You're all set! Is there anything else before I let you go?
+[2026-04-29T02:04:05Z] CUSTOMER: Okay.
+[2026-04-29T02:04:05Z] AGENT: Thank you for calling. Have a wonderful day!
+[2026-04-29T02:04:06Z] CUSTOMER: The thing is working more.
+[2026-04-29T02:04:06Z] AGENT: Sure, I can help you with that. Could you give me a bit more detail?

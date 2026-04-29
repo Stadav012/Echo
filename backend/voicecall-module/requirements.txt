@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pipecat-ai[deepgram,cartesia,silero,websocket]
+deepgram-sdk
+cartesia
+openai
+anthropic
+python-dotenv
+pydantic
+redis
+httpx
+websockets

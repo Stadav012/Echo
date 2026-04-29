@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice Assistant</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --brand: #2563eb;
+      --brand-light: #dbeafe;
+      --bg: #f1f5f9;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --agent-bg: #f8fafc;
+      --agent-border: #e2e8f0;
+      --customer-bg: #2563eb;
+      --customer-text: #ffffff;
+      --radius: 14px;
+      --shadow: 0 4px 24px rgba(0,0,0,.08);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+
+    header {
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 0 8px;
+    }
+
+    .logo-ring {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: var(--brand);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo-ring svg { width: 20px; height: 20px; fill: white; }
+
+    header h1 { font-size: 17px; font-weight: 600; }
+    header p  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    #transcript {
+      flex: 1;
+      width: 100%;
+      max-width: 560px;
+      overflow-y: auto;
+      padding: 12px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .bubble-wrap { display: flex; flex-direction: column; }
+    .bubble-wrap.agent    { align-items: flex-start; }
+    .bubble-wrap.customer { align-items: flex-end; }
+
+    .bubble {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .bubble.agent {
+      background: var(--agent-bg);
+      border: 1px solid var(--agent-border);
+      border-bottom-left-radius: 4px;
+      color: var(--text);
+    }
+    .bubble.customer {
+      background: var(--customer-bg);
+      color: var(--customer-text);
+      border-bottom-right-radius: 4px;
+    }
+
+    .bubble-label {
+      font-size: 11px; color: var(--muted);
+      margin-bottom: 4px; padding: 0 4px;
+    }
+
+    #status-card {
+      width: 100%; max-width: 560px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 28px 24px 24px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 16px;
+      margin-bottom: 16px; flex-shrink: 0;
+    }
+
+    .indicator-wrap {
+      position: relative; width: 72px; height: 72px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .ring { position: absolute; border-radius: 50%; opacity: 0; }
+
+    .state-listening .ring {
+      border: 2px solid var(--brand);
+      animation: ripple 2s ease-out infinite;
+    }
+    .state-listening .ring:nth-child(2) { animation-delay: .5s; }
+    .state-listening .ring:nth-child(3) { animation-delay: 1s; }
+
+    @keyframes ripple {
+      0%   { width: 72px;  height: 72px;  opacity: .5; }
+      100% { width: 130px; height: 130px; opacity: 0; }
+    }
+
+    .state-speaking .ring {
+      border: 2px solid #16a34a;
+      animation: ripple-green 1.4s ease-out infinite;
+    }
+    .state-speaking .ring:nth-child(2) { animation-delay: .35s; }
+    .state-speaking .ring:nth-child(3) { animation-delay: .7s; }
+
+    @keyframes ripple-green {
+      0%   { width: 72px;  height: 72px;  opacity: .6; }
+      100% { width: 120px; height: 120px; opacity: 0; }
+    }
+
+    .mic-btn {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: var(--brand); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 12px rgba(37,99,235,.35);
+      transition: background .2s, transform .1s; z-index: 1; flex-shrink: 0;
+    }
+    .mic-btn:hover   { background: #1d4ed8; }
+    .mic-btn:active  { transform: scale(.96); }
+    .mic-btn.speaking { background: #16a34a; box-shadow: 0 2px 12px rgba(22,163,74,.35); }
+    .mic-btn svg { width: 28px; height: 28px; fill: white; }
+
+    #active-status-text { font-size: 14px; color: var(--muted); }
+
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--brand-light);
+      border-top-color: var(--brand);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .banner {
+      width: 100%; max-width: 560px;
+      padding: 16px 20px; border-radius: var(--radius);
+      font-size: 14px; text-align: center; display: none;
+    }
+    .banner.info  { background: #f0f9ff; border: 1px solid #bae6fd; color: #0369a1; }
+    .banner.error { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; }
+
+    #permission-prompt { display: none; text-align: center; max-width: 320px; }
+    #permission-prompt p { color: var(--muted); font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
+    #grant-btn {
+      background: var(--brand); color: white; border: none;
+      padding: 10px 24px; border-radius: 8px; font-size: 15px;
+      cursor: pointer; font-weight: 500;
+    }
+    #grant-btn:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-ring">
+    <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zm-1 15.93V20H9v2h6v-2h-2v-2.07A8.001 8.001 0 0 0 20 11h-2a6 6 0 0 1-12 0H4a8.001 8.001 0 0 0 7 7.93z"/></svg>
+  </div>
+  <div>
+    <h1>Voice Assistant</h1>
+    <p>Secure &amp; encrypted</p>
+  </div>
+</header>
+
+<div id="transcript" role="log" aria-live="polite"></div>
+
+<div id="status-card">
+  <div id="view-connecting" style="display:flex;flex-direction:column;align-items:center;gap:16px;">
+    <div class="spinner"></div>
+    <span id="status-text">Connecting…</span>
+  </div>
+
+  <div id="permission-prompt">
+    <p>We need access to your microphone to start the conversation. Your audio is never stored.</p>
+    <button id="grant-btn">Allow Microphone</button>
+  </div>
+
+  <div id="view-active" style="display:none;flex-direction:column;align-items:center;gap:16px;">
+    <div class="indicator-wrap" id="indicator">
+      <div class="ring"></div>
+      <div class="ring"></div>
+      <div class="ring"></div>
+      <button class="mic-btn" id="mic-btn" disabled>
+        <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zm-1 15.93V20H9v2h6v-2h-2v-2.07A8.001 8.001 0 0 0 20 11h-2a6 6 0 0 1-12 0H4a8.001 8.001 0 0 0 7 7.93z"/></svg>
+      </button>
+    </div>
+    <span id="active-status-text">Listening…</span>
+  </div>
+</div>
+
+<div id="banner-done"    class="banner info">This conversation has ended. You may close this window.</div>
+<div id="banner-expired" class="banner info">This session has expired.</div>
+<div id="banner-error"   class="banner error"></div>
+
+<script>
+  const SESSION_ID = "{{SESSION_ID}}";
+
+  const transcriptEl     = document.getElementById('transcript');
+  const viewConnecting   = document.getElementById('view-connecting');
+  const viewActive       = document.getElementById('view-active');
+  const permissionPrompt = document.getElementById('permission-prompt');
+  const statusCardEl     = document.getElementById('status-card');
+  const statusText       = document.getElementById('status-text');
+  const activeStatusText = document.getElementById('active-status-text');
+  const indicatorEl      = document.getElementById('indicator');
+  const micBtn           = document.getElementById('mic-btn');
+  const bannerDone       = document.getElementById('banner-done');
+  const bannerExpired    = document.getElementById('banner-expired');
+  const bannerError      = document.getElementById('banner-error');
+  const grantBtn         = document.getElementById('grant-btn');
+
+  // ---- State ----
+  let ws            = null;
+  let audioCtx      = null;
+  let micStream     = null;
+  let scriptProc    = null;
+  let nextStartTime = 0;
+  let agentSpeaking = false;
+
+  // Audio that arrived before AudioContext was ready
+  let pendingAudio  = [];
+  let audioReady    = false;
+
+  // ---- UI helpers ----
+  function setUIState(state) {
+    viewConnecting.style.display   = 'none';
+    permissionPrompt.style.display = 'none';
+    viewActive.style.display       = 'none';
+    statusCardEl.style.display     = 'flex';
+    bannerDone.style.display       = 'none';
+    bannerExpired.style.display    = 'none';
+    bannerError.style.display      = 'none';
+    indicatorEl.className          = 'indicator-wrap';
+
+    if (state === 'connecting') {
+      viewConnecting.style.display = 'flex';
+    } else if (state === 'permission') {
+      permissionPrompt.style.display = 'block';
+    } else if (state === 'listening') {
+      viewActive.style.display = 'flex';
+      indicatorEl.classList.add('state-listening');
+      activeStatusText.textContent = 'Listening…';
+      micBtn.classList.remove('speaking');
+    } else if (state === 'speaking') {
+      viewActive.style.display = 'flex';
+      indicatorEl.classList.add('state-speaking');
+      activeStatusText.textContent = 'Agent speaking…';
+      micBtn.classList.add('speaking');
+    } else if (state === 'done') {
+      statusCardEl.style.display = 'none';
+      bannerDone.style.display   = 'block';
+    } else if (state === 'expired') {
+      statusCardEl.style.display  = 'none';
+      bannerExpired.style.display = 'block';
+    }
+  }
+
+  function showError(msg) {
+    statusCardEl.style.display = 'none';
+    bannerError.textContent    = msg;
+    bannerError.style.display  = 'block';
+  }
+
+  function addBubble(role, text) {
+    const wrap   = document.createElement('div');
+    wrap.className = `bubble-wrap ${role}`;
+    const label  = document.createElement('div');
+    label.className = 'bubble-label';
+    label.textContent = role === 'agent' ? 'Assistant' : 'You';
+    const bubble = document.createElement('div');
+    bubble.className = `bubble ${role}`;
+    bubble.textContent = text;
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    transcriptEl.appendChild(wrap);
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+
+  // ---- Audio playback ----
+  // AudioContext is created on user gesture (grantBtn click).
+  // Audio that arrives before that is buffered in pendingAudio[].
+
+  function pcmToFloat32(buffer) {
+    const view    = new DataView(buffer);
+    const samples = buffer.byteLength / 2;
+    const out     = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      out[i] = view.getInt16(i * 2, true) / 32768;
+    }
+    return out;
+  }
+
+  function playFloat32(float32) {
+    // Agent TTS is 16 kHz PCM. Create the buffer at 16000 so the browser
+    // resamples to its native rate automatically.
+    const buf = audioCtx.createBuffer(1, float32.length, 16000);
+    buf.copyToChannel(float32, 0);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    if (nextStartTime < now) nextStartTime = now;
+    src.start(nextStartTime);
+    nextStartTime += buf.duration;
+
+    src.onended = () => {
+      // If nothing queued after this, switch back to listening state
+      if (nextStartTime <= audioCtx.currentTime + 0.05) {
+        agentSpeaking = false;
+        setUIState('listening');
+      }
+    };
+  }
+
+  function handleIncomingAudio(arrayBuffer) {
+    if (!audioReady) {
+      // Store a copy — the original buffer may be reused by the browser
+      pendingAudio.push(arrayBuffer.slice(0));
+      return;
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const float32 = pcmToFloat32(arrayBuffer);
+    if (!agentSpeaking) {
+      agentSpeaking = true;
+      setUIState('speaking');
+    }
+    playFloat32(float32);
+  }
+
+  function drainPendingAudio() {
+    for (const ab of pendingAudio) {
+      const float32 = pcmToFloat32(ab);
+      if (!agentSpeaking) {
+        agentSpeaking = true;
+        setUIState('speaking');
+      }
+      playFloat32(float32);
+    }
+    pendingAudio = [];
+  }
+
+  // ---- Microphone capture (PCM 16-bit, sent to server at whatever rate the
+  //      AudioContext actually runs at — we label it 16 kHz in the serializer) ----
+  async function startMic() {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl:  true,
+      }
+    });
+
+    // Create AudioContext at 16 kHz. If the browser doesn't honour it
+    // the resampling step below in onaudioprocess still sends sensible PCM.
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    await audioCtx.resume();
+
+    const source  = audioCtx.createMediaStreamSource(micStream);
+    scriptProc    = audioCtx.createScriptProcessor(4096, 1, 1);
+    source.connect(scriptProc);
+
+    // Connect to a silent gain node so the ScriptProcessor fires but mic
+    // audio is NOT echoed to the speakers.
+    const silencer = audioCtx.createGain();
+    silencer.gain.value = 0;
+    scriptProc.connect(silencer);
+    silencer.connect(audioCtx.destination);
+
+    scriptProc.onaudioprocess = (e) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const float32 = e.inputBuffer.getChannelData(0);
+      const int16   = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) {
+        const s  = Math.max(-1, Math.min(1, float32[i]));
+        int16[i] = s < 0 ? s * 32768 : s * 32767;
+      }
+      ws.send(int16.buffer);
+    };
+  }
+
+  function stopMic() {
+    if (scriptProc) { scriptProc.disconnect(); scriptProc = null; }
+    if (micStream)  { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  }
+
+  // ---- WebSocket ----
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/${SESSION_ID}`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => setUIState('permission');
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'transcript') {
+            addBubble(msg.role, msg.text);
+          } else if (msg.type === 'session_end') {
+            cleanup(); setUIState('done');
+          } else if (msg.type === 'error') {
+            showError(msg.message || 'An error occurred.');
+          }
+        } catch (_) {}
+      } else {
+        handleIncomingAudio(event.data);
+      }
+    };
+
+    ws.onerror = () => showError('Connection error. Please refresh the page to try again.');
+
+    ws.onclose = (e) => {
+      cleanup();
+      if (e.code === 4004) setUIState('expired');
+      else                  setUIState('done');
+    };
+  }
+
+  function cleanup() {
+    stopMic();
+    if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000);
+  }
+
+  // ---- Microphone permission flow ----
+  async function requestMicAndStart() {
+    permissionPrompt.style.display = 'none';
+    viewConnecting.style.display   = 'flex';
+    statusText.textContent         = 'Starting microphone…';
+
+    try {
+      await startMic();      // creates AudioContext + ScriptProcessor
+      audioReady = true;
+      drainPendingAudio();   // play any greeting that arrived early
+      setUIState('listening');
+    } catch (err) {
+      showError('Microphone access was denied. Please allow microphone access in your browser settings and refresh.');
+    }
+  }
+
+  grantBtn.addEventListener('click', requestMicAndStart);
+
+  setUIState('connecting');
+  connect();
+</script>
+</body>
+</html>
