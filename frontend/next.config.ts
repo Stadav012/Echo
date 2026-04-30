@@ -4,6 +4,7 @@ import type { NextConfig } from "next";
 // Repo uses npm workspaces; deps are hoisted to the repo root.
 // Point Turbopack at the repo root so node_modules resolves.
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["10.255.32.100"],
   turbopack: {
     root: path.resolve(__dirname, ".."),
   },

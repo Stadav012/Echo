@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
@@ -269,7 +270,7 @@ export default function ResearchCampaignModal({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -278,7 +279,7 @@ export default function ResearchCampaignModal({
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 80,
+        zIndex: 1000,
         background: "rgba(17, 24, 39, 0.45)",
         backdropFilter: "blur(3px)",
         display: "flex",
@@ -672,7 +673,7 @@ export default function ResearchCampaignModal({
           style={{
             position: "fixed",
             inset: 0,
-            zIndex: 90,
+            zIndex: 1010,
             background: "rgba(17, 24, 39, 0.38)",
             display: "flex",
             alignItems: "center",
@@ -723,6 +724,7 @@ export default function ResearchCampaignModal({
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
