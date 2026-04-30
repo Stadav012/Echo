@@ -1,0 +1,2 @@
+[2026-04-29T01:51:48Z] SYSTEM: Session started — customer_id=test_001 name=Tendai
+[2026-04-29T01:51:48Z] AGENT: Hello! Thanks for reaching out. How can I help you today?
