@@ -73,6 +73,12 @@ def _deterministic_fallback_utterance(
     return current_question
 
 
+_SENTENCE_END_RE = re.compile(r"[.!?]\s*$")
+_TRAILING_TAIL_MIN_CHARS = (
+    20  # fragments shorter than this with no [.!?] are usually max-token cutoffs
+)
+
+
 def _sanitize_spoken_text(raw: str, *, max_sentences: int = 2) -> str:
     text = (raw or "").strip()
     text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
@@ -80,10 +86,26 @@ def _sanitize_spoken_text(raw: str, *, max_sentences: int = 2) -> str:
     text = re.sub(r"^.*?(?:here(?:'| i)s my follow-up:?|my follow-up question:?)[\r\n]+", "", text, flags=re.IGNORECASE | re.DOTALL)
     text = text.strip().strip('"').strip()
     text = " ".join(text.split())
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    if len(sentences) > max_sentences:
-        text = " ".join(sentences[:max_sentences]).strip()
-    return text
+    fragments = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+    if not fragments:
+        return ""
+
+    chosen: list[str] = []
+    for frag in fragments:
+        if len(chosen) >= max_sentences:
+            break
+        if _SENTENCE_END_RE.search(frag):
+            chosen.append(frag)
+            continue
+        if not chosen:
+            chosen.append(frag)
+            break
+        if len(frag) >= _TRAILING_TAIL_MIN_CHARS:
+            chosen.append(frag)
+        break
+
+    return " ".join(chosen).strip()
 
 
 async def call_llm(
@@ -93,7 +115,7 @@ async def call_llm(
     model: str,
     messages: list[dict[str, str]],
     session_id: str,
-    max_tokens: int = 180,
+    max_tokens: int = 320,
 ) -> str:
     async def _send_once(target_base_url: str, target_api_key: str, target_model: str) -> str:
         url = f"{target_base_url.rstrip('/')}/chat/completions"
