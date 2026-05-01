@@ -1,75 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-const transcripts = [
-  {
-    id: "t1",
-    participant: "Sarah Mitchell",
-    campaign: "User Onboarding Study",
-    date: "Apr 8, 2026",
-    duration: "14:23",
-    questions: 8,
-    sentiment: "positive",
-    excerpt:
-      "I really enjoyed the step-by-step walkthrough. It made the whole process feel intuitive and I didn't need to look for help at any point...",
-  },
-  {
-    id: "t2",
-    participant: "James Kim",
-    campaign: "User Onboarding Study",
-    date: "Apr 8, 2026",
-    duration: "11:05",
-    questions: 8,
-    sentiment: "neutral",
-    excerpt:
-      "The sign-up was straightforward, but I wasn't sure what to do after creating my account. The dashboard felt a bit overwhelming at first...",
-  },
-  {
-    id: "t3",
-    participant: "Maria López",
-    campaign: "Product Satisfaction Q2",
-    date: "Apr 7, 2026",
-    duration: "16:50",
-    questions: 12,
-    sentiment: "positive",
-    excerpt:
-      "Your support team has been amazing. Every time I reach out, I get a response within an hour and they always resolve my issues quickly...",
-  },
-  {
-    id: "t4",
-    participant: "David Brown",
-    campaign: "User Onboarding Study",
-    date: "Apr 7, 2026",
-    duration: "12:34",
-    questions: 8,
-    sentiment: "negative",
-    excerpt:
-      "I had trouble connecting my external accounts. The integration page kept failing silently without any error messages, which was frustrating...",
-  },
-  {
-    id: "t5",
-    participant: "Emma Taylor",
-    campaign: "Product Satisfaction Q2",
-    date: "Apr 7, 2026",
-    duration: "9:22",
-    questions: 12,
-    sentiment: "positive",
-    excerpt:
-      "The new analytics dashboard is exactly what we needed. Being able to see real-time metrics has significantly improved our decision-making...",
-  },
-  {
-    id: "t6",
-    participant: "Robert Chen",
-    campaign: "Feature Prioritization",
-    date: "Apr 5, 2026",
-    duration: "15:01",
-    questions: 6,
-    sentiment: "neutral",
-    excerpt:
-      "I think the collaboration features should be the top priority. We use the product mainly for team projects and better sharing would help a lot...",
-  },
-];
+type TranscriptRow = {
+  id: string;
+  sentiment: "positive" | "neutral" | "negative" | null;
+  excerpt: string | null;
+  full_text: string | null;
+  questions_count: number | null;
+  created_at: string;
+};
+
+type CallRow = {
+  id: string;
+  participant_name: string | null;
+  duration_seconds: number | null;
+  created_at: string;
+  research_campaigns?: { title: string | null } | null;
+  transcripts: TranscriptRow[] | null;
+};
+
+type TranscriptItem = {
+  id: string;
+  participant: string;
+  campaign: string;
+  date: string;
+  dateIso: string;
+  duration: string;
+  questions: number;
+  sentiment: "positive" | "neutral" | "negative" | "unknown";
+  excerpt: string;
+};
 
 const sentimentConfig: Record<
   string,
@@ -78,13 +41,92 @@ const sentimentConfig: Record<
   positive: { label: "Positive", color: "#065F46", bg: "var(--success-light)" },
   neutral: { label: "Neutral", color: "#92400E", bg: "var(--warning-light)" },
   negative: { label: "Negative", color: "#991B1B", bg: "var(--danger-light)" },
+  unknown: { label: "Unknown", color: "var(--text-secondary)", bg: "var(--bg-muted)" },
 };
 
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function fmtDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function TranscriptsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [campaignFilter, setCampaignFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
 
-  const campaigns = [...new Set(transcripts.map((t) => t.campaign))];
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/auth/login");
+        return;
+      }
+
+      const { data, error: fetchError } = await supabase
+        .from("calls")
+        .select(
+          "id, participant_name, duration_seconds, created_at, research_campaigns(title), transcripts(id, sentiment, excerpt, full_text, questions_count, created_at)"
+        )
+        .order("created_at", { ascending: false });
+
+      if (fetchError) {
+        setError(fetchError.message || "Failed to load transcripts.");
+        setLoading(false);
+        return;
+      }
+
+      const rows = (data as CallRow[] | null) ?? [];
+      const mapped: TranscriptItem[] = [];
+
+      for (const call of rows) {
+        const callTranscripts = call.transcripts ?? [];
+        for (const t of callTranscripts) {
+          const excerpt =
+            t.excerpt?.trim() ||
+            t.full_text?.trim().slice(0, 220) ||
+            "No excerpt available.";
+          mapped.push({
+            id: t.id,
+            participant: (call.participant_name || "Unknown Participant").trim(),
+            campaign: call.research_campaigns?.title?.trim() || "Untitled Campaign",
+            dateIso: t.created_at || call.created_at,
+            date: fmtDate(t.created_at || call.created_at),
+            duration: fmtDuration(call.duration_seconds ?? 0),
+            questions: t.questions_count ?? 0,
+            sentiment: t.sentiment ?? "unknown",
+            excerpt,
+          });
+        }
+      }
+
+      setTranscripts(mapped);
+      setLoading(false);
+    };
+
+    void load();
+  }, [router]);
+
+  const campaigns = useMemo(
+    () => [...new Set(transcripts.map((t) => t.campaign))],
+    [transcripts]
+  );
 
   const filtered = transcripts.filter((t) => {
     const matchesSearch =
@@ -95,6 +137,36 @@ export default function TranscriptsPage() {
       campaignFilter === "all" || t.campaign === campaignFilter;
     return matchesSearch && matchesCampaign;
   });
+
+  const exportAll = () => {
+    if (filtered.length === 0) return;
+    const csvRows = [
+      ["participant", "campaign", "date", "duration", "questions", "sentiment", "excerpt"],
+      ...filtered.map((t) => [
+        t.participant,
+        t.campaign,
+        t.dateIso,
+        t.duration,
+        String(t.questions),
+        t.sentiment,
+        t.excerpt.replace(/\s+/g, " "),
+      ]),
+    ];
+    const csv = csvRows
+      .map((row) =>
+        row
+          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "transcripts.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="animate-fade-in">
@@ -125,6 +197,8 @@ export default function TranscriptsPage() {
         <button
           className="btn btn-secondary"
           style={{ padding: "10px 20px", fontSize: "14px" }}
+          onClick={exportAll}
+          disabled={filtered.length === 0}
         >
           <svg
             width="16"
@@ -199,6 +273,26 @@ export default function TranscriptsPage() {
         Showing {filtered.length} of {transcripts.length} transcripts
       </div>
 
+      {loading && (
+        <div className="card" style={{ padding: "20px 24px" }}>
+          <span style={{ color: "var(--text-secondary)" }}>Loading transcripts…</span>
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="card" style={{ padding: "20px 24px", borderColor: "var(--danger)" }}>
+          <span style={{ color: "#991B1B" }}>{error}</span>
+        </div>
+      )}
+
+      {!loading && !error && filtered.length === 0 && (
+        <div className="card" style={{ padding: "20px 24px" }}>
+          <span style={{ color: "var(--text-secondary)" }}>
+            No transcripts found for the current filters.
+          </span>
+        </div>
+      )}
+
       {/* Transcript list */}
       <div
         className="stagger-children"
@@ -258,11 +352,11 @@ export default function TranscriptsPage() {
                       fontWeight: 500,
                       padding: "2px 10px",
                       borderRadius: "var(--radius-full)",
-                      background: sentimentConfig[transcript.sentiment].bg,
-                      color: sentimentConfig[transcript.sentiment].color,
+                      background: sentimentConfig[transcript.sentiment]?.bg ?? sentimentConfig.unknown.bg,
+                      color: sentimentConfig[transcript.sentiment]?.color ?? sentimentConfig.unknown.color,
                     }}
                   >
-                    {sentimentConfig[transcript.sentiment].label}
+                    {sentimentConfig[transcript.sentiment]?.label ?? sentimentConfig.unknown.label}
                   </span>
                 </div>
                 <div
