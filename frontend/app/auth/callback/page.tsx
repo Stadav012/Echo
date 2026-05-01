@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -16,22 +16,47 @@ function SoundWave() {
 
 export default function AuthCallbackPage() {
   const router = useRouter();
+  const ran = useRef(false);
 
   useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
+
     const finish = async () => {
-      const code = new URLSearchParams(window.location.search).get("code");
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      const errorParam = params.get("error");
+      const errorDescription = params.get("error_description");
+
+      if (errorParam) {
+        console.error("OAuth error:", errorParam, errorDescription);
+        router.replace(`/auth/login?error=${encodeURIComponent(errorDescription ?? errorParam)}`);
+        return;
+      }
 
       if (code) {
-        await supabase.auth.exchangeCodeForSession(code);
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          console.error("exchangeCodeForSession failed:", error.message);
+          router.replace(`/auth/login?error=${encodeURIComponent(error.message)}`);
+          return;
+        }
+      } else {
+        // Implicit flow — tokens arrive in the URL hash; Supabase parses them automatically.
+        // Wait briefly for the client to process the hash before checking the session.
+        await new Promise((r) => setTimeout(r, 100));
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          router.replace("/auth/login?error=no_session");
+          return;
+        }
       }
 
       // Apply role chosen on the register page before the OAuth redirect
       const pendingRole = localStorage.getItem("pending_google_role");
       if (pendingRole) {
         localStorage.removeItem("pending_google_role");
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        const { data: { user } } = await supabase.auth.getUser();
         if (user && !user.user_metadata?.role) {
           await supabase.auth.updateUser({ data: { role: pendingRole } });
         }
