@@ -30,7 +30,7 @@ def _farewell_text(session: SessionState) -> str:
     name = _participant_first_name(session)
     return (
         f"That's everything I wanted to ask, {name}. "
-        "Thanks so much for taking the time — really appreciate your thoughts. Take care."
+        "Thanks so much for taking the time — really appreciate your thoughts. Take care.."
     )
 
 
