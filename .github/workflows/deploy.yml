@@ -29,20 +29,24 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-  deploy-voice-railway:
-    name: Deploy Voice Backend (Railway)
+  deploy-voice-render:
+    name: Deploy Voice Backend (Render)
     runs-on: ubuntu-latest
-    if: ${{ secrets.RAILWAY_TOKEN != '' && secrets.RAILWAY_PROJECT_ID != '' && secrets.RAILWAY_SERVICE_ID != '' }}
-    defaults:
-      run:
-        working-directory: backend/voicecall-module
+    if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - run: npm i -g @railway/cli
-      - run: railway up --ci --service ${{ secrets.RAILWAY_SERVICE_ID }}
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      - name: Trigger Render deploy hook
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+
+      - name: Optional health check
+        if: ${{ secrets.RENDER_HEALTHCHECK_URL != '' }}
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS "${{ secrets.RENDER_HEALTHCHECK_URL }}"; then
+              echo "Render health check passed"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Render health check did not pass in time"
+          exit 1

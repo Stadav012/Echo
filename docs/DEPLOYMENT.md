@@ -4,7 +4,7 @@ This repository is now prepared for:
 
 - CI on every push/PR via GitHub Actions
 - Frontend deployment to Vercel
-- Voice backend deployment to Railway
+- Voice backend deployment to Render
 - Local production-like smoke testing via Docker Compose
 
 ## 1) Workflows Added
@@ -14,7 +14,7 @@ This repository is now prepared for:
   - Voice backend: install requirements and `py_compile` checks
 - `.github/workflows/deploy.yml`
   - Frontend deploy job (Vercel)
-  - Voice backend deploy job (Railway)
+  - Voice backend deploy job (Render via deploy hook)
   - Deploy jobs run only when required secrets are present
 
 ## 2) Containerization Added
@@ -41,11 +41,10 @@ Set these in `Settings -> Secrets and variables -> Actions`.
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
-### Railway
+### Render
 
-- `RAILWAY_TOKEN`
-- `RAILWAY_PROJECT_ID`
-- `RAILWAY_SERVICE_ID`
+- `RENDER_DEPLOY_HOOK_URL`
+- `RENDER_HEALTHCHECK_URL` (optional, e.g. `https://<your-render-service>/health`)
 
 ## 4) Runtime Environment Variables
 
@@ -65,7 +64,7 @@ At minimum:
 - `GEMINI_API_KEY` (fallback)
 - `GEMINI_MODEL=gemini-2.5-flash`
 
-### Voice backend (Railway)
+### Voice backend (Render)
 
 At minimum:
 
@@ -74,7 +73,7 @@ At minimum:
 - `CARTESIA_VOICE_ID`
 - `API_KEY`
 - `CALLBACK_SECRET`
-- `BASE_URL` (public Railway URL)
+- `BASE_URL` (public Render URL)
 - `LLM_PROVIDER=qwen`
 - `QWEN_API_KEY`
 - `QWEN_MODEL=qwen-vl-max`
@@ -91,7 +90,7 @@ Optional:
 
 ## 5) Deployment Order
 
-1. Deploy voice backend (Railway) first.
+1. Deploy voice backend (Render) first.
 2. Copy backend public URL into frontend `VOICE_SERVICE_URL`.
 3. Deploy frontend (Vercel).
 4. Validate health:
