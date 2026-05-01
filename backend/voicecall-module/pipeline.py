@@ -1,5 +1,4 @@
 import asyncio
-import json as _json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,12 +7,14 @@ from typing import TYPE_CHECKING
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     InputAudioRawFrame,
-    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     OutputAudioRawFrame,
     TextFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 TRANSCRIPTS_DIR = Path(__file__).parent / "transcripts"
 FALLBACK_RESPONSE = "I'm sorry, I didn't receive a response. Could you repeat that?"
+KICKOFF_MARKER = "[CALL_STARTED]"
 
 
 # ---------------------------------------------------------------------------
@@ -52,15 +54,16 @@ FALLBACK_RESPONSE = "I'm sorry, I didn't receive a response. Could you repeat th
 class RawAudioSerializer(FrameSerializer):
     """
     Binary:  OutputAudioRawFrame  → raw PCM bytes  (browser plays these)
-    Text:    InterruptionFrame    → {"type":"interrupt"}  (browser flushes queue)
     Receive: raw bytes            → InputAudioRawFrame    (mic audio from browser)
+
+    Half-duplex mode: the agent always finishes speaking before the participant
+    can speak. We therefore do NOT translate any client-side "user_speaking"
+    signal into an InterruptionFrame, and we never emit interrupt JSON.
     """
 
     async def serialize(self, frame) -> bytes | str | None:
         if isinstance(frame, OutputAudioRawFrame):
             return frame.audio
-        if isinstance(frame, InterruptionFrame):
-            return _json.dumps({"type": "interrupt"})
         return None
 
     async def deserialize(self, data) -> object | None:
@@ -70,14 +73,6 @@ class RawAudioSerializer(FrameSerializer):
                 sample_rate=16000,
                 num_channels=1,
             )
-        # Browser detected speech locally and is telling us to stop TTS now
-        if isinstance(data, str):
-            try:
-                msg = _json.loads(data)
-                if msg.get("type") == "user_speaking":
-                    return InterruptionFrame()
-            except (ValueError, KeyError):
-                pass
         return None
 
 
@@ -103,6 +98,42 @@ class AudioDebugger(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class BotSpeakingWatchdog(FrameProcessor):
+    """
+    Sits between TTS and transport.output(). Pipecat publishes
+    BotStartedSpeakingFrame / BotStoppedSpeakingFrame upstream from the
+    transport output as TTS audio actually starts/finishes playing — those
+    events are the authoritative truth for "is the agent talking right now?"
+
+    On each transition we both:
+      - push a JSON message to the participant page so the mic lock flips,
+      - signal the per-session asyncio.Event so BackendRelayProcessor's
+        _respond can wait for TTS to drain before going idle.
+    """
+
+    def __init__(self, session_id: str, manager: "SessionManager") -> None:
+        super().__init__()
+        self._session_id = session_id
+        self._manager = manager
+
+    async def process_frame(self, frame: object, direction: FrameDirection) -> None:  # type: ignore[override]
+        await super().process_frame(frame, direction)
+        if isinstance(frame, BotStartedSpeakingFrame):
+            logger.info("[%s] Bot started speaking", self._session_id)
+            await self._manager.send_browser_message(
+                self._session_id,
+                {"type": "agent_speaking", "speaking": True},
+            )
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            logger.info("[%s] Bot stopped speaking", self._session_id)
+            await self._manager.send_browser_message(
+                self._session_id,
+                {"type": "agent_speaking", "speaking": False},
+            )
+            self._manager.signal_bot_speaking_done(self._session_id)
+        await self.push_frame(frame, direction)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -124,22 +155,20 @@ def _write_line(path: Path, role: str, text: str) -> None:
 
 class BackendRelayProcessor(FrameProcessor):
     """
-    Finite-state relay between the customer and the external backend (LLM).
+    Half-duplex relay between the customer and the in-process ResearchAgent.
 
-    IDLE        — waiting for the customer to speak
-    PROCESSING  — a TranscriptionFrame has been sent to the backend; waiting
-                  for a response TextFrame to push to TTS
+    Flow:
+      1. STT emits a TranscriptionFrame.
+      2. We forward the text to the agent over the /agent WebSocket and wait
+         for a reply.
+      3. We push the reply text to the browser as a JSON `transcript` message
+         (so the question is visible) and to TTS as a TextFrame (so it's
+         spoken).
 
-    Transitions:
-      IDLE       → PROCESSING  on TranscriptionFrame
-      PROCESSING → IDLE        on response received (or timeout / fallback)
-      PROCESSING → IDLE        on InterruptionFrame (customer barged in)
-        ↳ cancels the in-flight backend request so we don't speak over them
-
-    When interrupted:
-      - The pending _respond task is cancelled immediately.
-      - InterruptionFrame is forwarded downstream so CartesiaTTSService and
-        the transport output also stop and flush.
+    There is no barge-in: while the agent is speaking, the client must hold the
+    mic input. We only process customer transcriptions when we're not already
+    waiting on a reply, so any speech that leaks through during agent playback
+    is dropped.
     """
 
     _STATE_IDLE       = "idle"
@@ -161,51 +190,94 @@ class BackendRelayProcessor(FrameProcessor):
     async def process_frame(self, frame: object, direction: FrameDirection) -> None:  # type: ignore[override]
         await super().process_frame(frame, direction)
 
-        # ── Barge-in: customer started speaking ──────────────────────────
-        if isinstance(frame, (InterruptionFrame, VADUserStartedSpeakingFrame)):
-            if self._state == self._STATE_PROCESSING and self._pending:
-                self._pending.cancel()
-                logger.info("[%s] INTERRUPTED — response cancelled", self._session_id)
-            self._state = self._STATE_IDLE
-            # Forward so TTS + transport output also flush
-            await self.push_frame(frame, direction)
-
-        # ── Customer finished speaking: new transcription ─────────────────
-        elif isinstance(frame, TranscriptionFrame) and frame.text.strip():
+        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             text = frame.text.strip()
-            logger.info("[%s] CUSTOMER SAID: %s", self._session_id, text)
-            await asyncio.to_thread(_write_line, self._transcript, "customer", text)
+            is_kickoff = text == KICKOFF_MARKER
+
+            if is_kickoff:
+                logger.info("[%s] KICKOFF — agent will speak first", self._session_id)
+            else:
+                if self._state == self._STATE_PROCESSING:
+                    logger.info(
+                        "[%s] Ignoring late transcription while agent is speaking: %s",
+                        self._session_id, text,
+                    )
+                    return
+                logger.info("[%s] CUSTOMER SAID: %s", self._session_id, text)
+                await asyncio.to_thread(_write_line, self._transcript, "customer", text)
+                await self._manager.append_transcript(self._session_id, "customer", text)
+                await self._manager.send_browser_message(
+                    self._session_id,
+                    {"type": "transcript", "role": "customer", "text": text},
+                )
 
             self._state   = self._STATE_PROCESSING
-            self._pending = asyncio.create_task(self._respond(text))
-
+            self._pending = asyncio.create_task(self._respond(text, is_kickoff=is_kickoff))
         else:
             await self.push_frame(frame, direction)
 
-    async def _respond(self, text: str) -> None:
+    async def _respond(self, text: str, is_kickoff: bool = False) -> None:
         try:
             sent = await self._manager.send_transcription_to_agent(self._session_id, text)
             if sent:
-                response = await self._manager.get_agent_response(
-                    self._session_id, timeout=10.0
+                response, end_after = await self._manager.get_agent_response(
+                    self._session_id, timeout=20.0
                 )
                 if response is None:
                     logger.warning("[%s] Backend timed out", self._session_id)
                     response = FALLBACK_RESPONSE
+                    end_after = False
             else:
                 logger.warning("[%s] No backend connected", self._session_id)
                 response = FALLBACK_RESPONSE
+                end_after = False
 
-            # Brief human-like pause before speaking — also a cancellation point
-            # so a barge-in during this window still cancels the response.
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.3)
 
             logger.info("[%s] AGENT REPLIES: %s", self._session_id, response)
             await asyncio.to_thread(_write_line, self._transcript, "agent", response)
-            await self.push_frame(TextFrame(response))
+            await self._manager.append_transcript(self._session_id, "agent", response)
+            await self._manager.send_browser_message(
+                self._session_id,
+                {"type": "transcript", "role": "agent", "text": response},
+            )
 
+            # Arm the speaking-done event BEFORE we push frames so the
+            # BotSpeakingWatchdog can flip it as soon as Pipecat emits
+            # BotStoppedSpeakingFrame. We then wait on it (with a generous
+            # safety timeout) — only after TTS has actually drained do we
+            # release the IDLE lock and start accepting new transcriptions.
+            #
+            # Pipecat's TTS service uses a sentence aggregator that buffers
+            # incomplete trailing sentences. The buffer is only flushed when
+            # an LLMFullResponseEndFrame arrives, and a fresh TTS context is
+            # created on LLMFullResponseStartFrame. Wrapping every response in
+            # this pair guarantees:
+            #   1. Each turn gets its own clean Cartesia context.
+            #   2. The final sentence (no trailing whitespace+capital) gets
+            #      flushed instead of leaking into the next turn.
+            done_event = self._manager.arm_bot_speaking_done(self._session_id)
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(TextFrame(response))
+            await self.push_frame(LLMFullResponseEndFrame())
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=45.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[%s] Timed out waiting for TTS to finish; releasing anyway",
+                    self._session_id,
+                )
+                await self._manager.send_browser_message(
+                    self._session_id,
+                    {"type": "agent_speaking", "speaking": False},
+                )
+
+            if end_after:
+                asyncio.create_task(
+                    self._manager.end_session(self._session_id, "agent_finished", force_cancel=False)
+                )
         except asyncio.CancelledError:
-            logger.info("[%s] _respond task cancelled (barge-in)", self._session_id)
+            logger.info("[%s] _respond task cancelled", self._session_id)
             raise
         finally:
             self._state = self._STATE_IDLE
@@ -243,7 +315,10 @@ async def create_pipeline_task(
         live_options=LiveOptions(
             language="en",
             model="nova-2",
-            endpointing=300,
+            endpointing=2500,
+            utterance_end_ms=3000,
+            smart_format=True,
+            interim_results=True,
         ),
     )
 
@@ -258,9 +333,9 @@ async def create_pipeline_task(
     vad = VADProcessor(
         vad_analyzer=SileroVADAnalyzer(
             params=VADParams(
-                confidence=0.5,
-                start_secs=0.2,
-                stop_secs=0.5,
+                confidence=0.55,
+                start_secs=0.4,
+                stop_secs=1.8,
                 min_volume=0.3,
             )
         )
@@ -274,6 +349,7 @@ async def create_pipeline_task(
             stt,
             BackendRelayProcessor(session.session_id, transcript_file, manager),
             tts,
+            BotSpeakingWatchdog(session.session_id, manager),
             transport.output(),
         ]
     )
@@ -281,7 +357,7 @@ async def create_pipeline_task(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
+            allow_interruptions=False,
             enable_metrics=False,
         ),
     )
@@ -303,6 +379,8 @@ async def run_pipeline(
         logger.exception("Pipeline error for session %s: %s", session.session_id, exc)
     finally:
         manager.remove_pipeline(session.session_id)
-        await manager.update_status(session.session_id, "completed")
-        await manager.send_callback(session.session_id)
+        sess = await manager.get_session(session.session_id)
+        if sess and sess.status not in ("completed", "expired"):
+            await manager.update_status(session.session_id, "completed")
+            await manager.send_callback(session.session_id)
         logger.info("Pipeline finished for session %s", session.session_id)

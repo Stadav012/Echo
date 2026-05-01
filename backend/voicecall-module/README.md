@@ -2,7 +2,11 @@
 
 Session-based voice agent system built with FastAPI, Pipecat, Deepgram (STT), and Cartesia (TTS).
 
-The browser UI handles microphone capture, plays back TTS audio, and performs local barge-in detection. An external backend (your LLM service) connects over a separate WebSocket to receive customer transcriptions and send back responses. During development you can simulate that backend with `agent_test_client.py`, which cycles replies from `dummy_responses.txt`.
+The browser UI shows a welcome card, asks for microphone permission only when the participant is ready, then plays back TTS audio half-duplex (no barge-in) and renders each question as a chat bubble.
+
+The voice service spawns an in-process **ResearchOrchestrator** ([`agent.py`](agent.py)) for every new session. A **deterministic question tracker** ([`agent_state.py`](agent_state.py)) walks `refinement_summary.improved_questions` in order (with one optional follow-up per question when answers are too short). A **composer** ([`agent_composer.py`](agent_composer.py)) makes a single small Ollama call per turn to phrase the current scripted question naturally. When the bank is exhausted, the orchestrator speaks a fixed farewell and sends `end_after: true` so the pipeline ends the session and fires the callback. The default LLM is a local Ollama instance so the system works offline with no paid API keys.
+
+`agent_test_client.py` and `dummy_responses.txt` are kept around as a manual smoke-test harness only; they are no longer part of the runtime path.
 
 ---
 
@@ -11,6 +15,7 @@ The browser UI handles microphone capture, plays back TTS audio, and performs lo
 - Python 3.11+
 - **Deepgram API key** — sign up at [console.deepgram.com](https://console.deepgram.com) → *Create API Key*
 - **Cartesia API key + Voice ID** — sign up at [play.cartesia.ai](https://play.cartesia.ai) → *API Keys* tab; pick a voice from the *Voice Library* and copy its ID
+- **Ollama** (default LLM) — install with `brew install ollama` (macOS) or follow [ollama.com/download](https://ollama.com/download). Then in a separate terminal run `ollama serve` and pull a small model once: `ollama pull llama3.2:1b` (~1.3 GB). Any other OpenAI-compatible host (OpenRouter, vLLM, OpenAI) works too — just point `LLM_BASE_URL` at it.
 
 ---
 
@@ -31,11 +36,13 @@ pip install -r requirements.txt
 
 ## 2. Configure environment variables
 
+The service loads either `.env.local` or `.env` from this directory. Create whichever you prefer:
+
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 ```
 
-Open `.env` and fill in:
+Open `.env.local` and fill in:
 
 ```env
 DEEPGRAM_API_KEY=<your Deepgram key>
@@ -44,18 +51,33 @@ CARTESIA_VOICE_ID=<voice ID from Cartesia Voice Library>
 BASE_URL=http://localhost:8000
 API_KEY=any-secret-you-choose
 CALLBACK_SECRET=any-secret-you-choose
+
+# LLM — defaults below run a local Ollama; works offline, no credits needed.
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_API_KEY=ollama
+LLM_MODEL=llama3.2:1b
 ```
 
 > `CARTESIA_MODEL` defaults to `sonic-2` if left blank.  
 > `SESSION_TIMEOUT_SECONDS` defaults to `300` (5 minutes).  
-> Leave `REDIS_URL` blank to use the in-memory session store.
+> Leave `REDIS_URL` blank to use the in-memory session store.  
+> `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL` configure the in-process ResearchOrchestrator composer. The defaults talk to a local Ollama; to use OpenRouter set `LLM_BASE_URL=https://openrouter.ai/api/v1`, `LLM_API_KEY=<your-or-key>`, and `LLM_MODEL=<openrouter-model>`.
 
 ---
 
 ## 3. Start the server
 
+In one terminal, make sure Ollama is running and the model is pulled (only needed once):
+
 ```bash
-uvicorn main:app --port 8000
+ollama serve                # leaves a process running
+ollama pull llama3.2:1b     # ~1.3 GB; smaller alternatives: qwen2.5:0.5b, qwen2.5:1.5b
+```
+
+In another terminal, start the voice service from inside the activated venv:
+
+```bash
+python -m uvicorn main:app --port 8000
 ```
 
 Expected output:
@@ -67,40 +89,43 @@ INFO:     Application startup complete.
 
 ---
 
-## 4. Run the dummy-text experiment (two terminals)
+## 4. Run a research-driven session
 
-This experiment lets you test the full voice pipeline without a real LLM. The `agent_test_client.py` script acts as the backend: it creates a session, connects to the agent WebSocket, and replies to each customer utterance with the next line from `dummy_responses.txt`.
-
-**Terminal 1** — start the server (see step 3 above, keep it running).
-
-**Terminal 2** — run the agent client:
+There is **no separate worker process** — the ResearchOrchestrator is spawned inside the FastAPI service for each new session. Sessions are normally created by the Next.js frontend (`/api/voice/sessions`) when a researcher clicks _Generate call link_ on a contact, but you can also create one manually:
 
 ```bash
-cd backend/voicecall-module
-source venv/bin/activate
-
-python agent_test_client.py
+curl -s -X POST http://localhost:8000/sessions/create \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{
+    "customer_id": "test-contact",
+    "customer_name": "Tendai",
+    "context": "Mobile onboarding research",
+    "callback_url": "http://localhost:3000/api/voice/callback",
+    "metadata": {
+      "research_campaign_id": "00000000-0000-0000-0000-000000000000",
+      "contact_id": "00000000-0000-0000-0000-000000000000",
+      "title": "Mobile onboarding research",
+      "description": "Understand pain points in first-time setup.",
+      "question_bank_text": "1. Walk me through your first day with the app.\n2. ...",
+      "refinement_summary": {
+        "improved_questions": [
+          "Tell me about the moment you decided to try the app.",
+          "What confused you most during sign-up?"
+        ],
+        "key_themes": ["onboarding friction", "value discovery"],
+        "notes": "Focus on first 24 hours."
+      },
+      "contact": { "name": "Tendai", "age": "29", "occupation": "Designer" }
+    }
+  }' | python3 -m json.tool
 ```
 
-The script prints a browser URL:
+Open the returned `talk_url` in a browser, click **Allow Microphone**, and the agent will speak first with a greeting + question. Speak back; the agent uses your answers to choose the next adaptive question from the refined question bank.
 
-```
-  Open this URL in your browser to start the conversation:
+### Legacy dummy-text harness
 
-    http://localhost:8000/talk/<session_id>
-```
-
-Open that URL, click **Allow Microphone**, and speak. You will:
-
-- See your words transcribed in Terminal 2 (`CUSTOMER ▶ …`)
-- Hear the agent reply through your speakers (Cartesia TTS)
-- Find both sides logged in `transcripts/agent_client.log`
-
-To use an existing session instead of creating a new one:
-
-```bash
-python agent_test_client.py <session_id>
-```
+`agent_test_client.py` + `dummy_responses.txt` are no longer part of the runtime path. They remain in the directory only as a manual smoke-test for the `/agent/{session_id}` WebSocket protocol; if you run it against a session, it will race the in-process ResearchOrchestrator.
 
 ---
 
@@ -143,6 +168,10 @@ curl -s -X POST http://localhost:8000/sessions/create \
 # Poll session status + transcript
 curl http://localhost:8000/sessions/<session_id> \
   -H "X-API-Key: your_api_key"
+
+# Force-end a live session (researcher / automation; cancels pipeline + callback)
+curl -s -X POST http://localhost:8000/sessions/<session_id>/end \
+  -H "X-API-Key: your_api_key"
 ```
 
 ---
@@ -165,7 +194,7 @@ ws://localhost:8000/agent/<session_id>?api_key=<API_KEY>
 
 | Type       | Payload                                    | Effect                                                      |
 | ---------- | ------------------------------------------ | ----------------------------------------------------------- |
-| `response` | `{"type": "response", "text": "..."}` | Text is forwarded to Cartesia TTS and spoken to the customer |
+| `response` | `{"type": "response", "text": "...", "end_after": true?}` | Text is forwarded to Cartesia TTS. If `end_after` is true, after playback the session is completed and the signed callback runs (same as participant hang-up). |
 
 ### Example interaction
 
@@ -189,17 +218,42 @@ You can connect at any point after the session is created and before it expires.
 | `CARTESIA_VOICE_ID` | Yes | — | Cartesia voice ID |
 | `CARTESIA_MODEL` | No | `sonic-2` | Cartesia model (`sonic-2` or `sonic-english`) |
 | `BASE_URL` | No | `http://localhost:8000` | Public base URL (change for deployment) |
-| `API_KEY` | Yes | — | Secret for `/sessions/create`, `/sessions/{id}`, and `/agent/{id}` |
+| `API_KEY` | Yes | — | Secret for `/sessions/create`, `/sessions/{id}`, `/sessions/{id}/end`, and `/agent/{id}` |
 | `SESSION_TIMEOUT_SECONDS` | No | `300` | Session TTL in seconds |
 | `CALLBACK_SECRET` | Yes | — | HMAC-SHA256 secret for signing callback payloads |
 | `REDIS_URL` | No | — | Redis connection URL; omit to use in-memory store |
+| `LLM_BASE_URL` | No | `http://localhost:11434/v1` | OpenAI-compatible chat-completions host. Defaults to a local Ollama. |
+| `LLM_API_KEY` | No | `ollama` | API key sent as `Authorization: Bearer …`. Ollama ignores it; OpenRouter/OpenAI require a real key. |
+| `LLM_MODEL` | No | `llama3.2:1b` | Model name passed to the chat-completions endpoint. |
+
+### Session metadata fields the ResearchOrchestrator reads
+
+`POST /sessions/create` accepts a free-form `metadata` object. The orchestrator recognises these keys (all optional):
+
+| Key | Type | Used for |
+|---|---|---|
+| `research_campaign_id` | string | round-tripped via callback so the caller can correlate |
+| `contact_id` | string | round-tripped via callback |
+| `title` | string | study title in kickoff / composer prompts |
+| `description` | string | study description in kickoff |
+| `interviewer_name` | string | spoken name for the interviewer (default: Alex) |
+| `question_bank_text` | string | fallback question list if no refinement summary |
+| `refinement_summary.improved_questions` | string[] | primary ordered question bank |
+| `refinement_summary.key_themes` | string[] | (reserved; tracker is deterministic today) |
+| `refinement_summary.notes` | string | (reserved) |
+| `contact.name` / `contact.age` / `contact.occupation` | strings | personalises greetings |
 
 ---
 
 ## Architecture
 
 ```
-POST /sessions/create  →  SessionManager  →  { session_id, talk_url }
+POST /sessions/create  →  SessionManager.create_session
+                              ├── persists SessionState
+                              └── spawns ResearchOrchestrator task (agent.py)
+                                       │
+                                       ▼
+                              WS connect → /agent/{id}?api_key=...
 
 GET  /talk/{id}        →  serves static/talk.html (SESSION_ID injected)
 
@@ -212,21 +266,38 @@ WS   /ws/{id}          →  Pipecat pipeline:
                                   ↓
                               BackendRelayProcessor   ←──────────────┐
                                   │  on TranscriptionFrame:          │
-                                  │  → sends to /agent/{id} WS      │
-                                  │  ← waits for response (10s)     │
+                                  │  → /agent/{id} WS                │
+                                  │  ← waits for response (20s)      │
+                                  │  ← also pushes JSON              │
+                                  │     {transcript|agent_speaking}  │
+                                  │     to the participant page      │
                                   ↓                                  │
                               Cartesia TTS                           │
                                   ↓                              WS  /agent/{id}
-                              Browser speakers                       │
-                                                            Your LLM backend
-                                                            (or agent_test_client.py)
+                              Browser speakers (PCM)                 │
+                                                            ResearchOrchestrator (in-process)
+                                                                agent_state.QuestionTracker + agent_composer + LLM_BASE_URL
+
+After accept, `ws_endpoint` schedules `kickoff_agent()` which injects a
+synthetic `[CALL_STARTED]` TranscriptionFrame into the pipeline so the
+agent speaks first (greeting + first question) before the participant
+says anything.
 
 GET  /sessions/{id}    →  status + transcript
 ```
 
-**Barge-in flow:** The browser detects sustained RMS above threshold in `onaudioprocess`, immediately flushes queued TTS audio, and sends `{"type":"user_speaking"}` to the server. The server returns an `InterruptionFrame` which cancels any in-flight backend request and stops Cartesia output.
+**Half-duplex turn-taking:** Interruptions are intentionally disabled. The participant page drops mic audio while the agent is speaking, the pipeline runs with `allow_interruptions=False`, and `BackendRelayProcessor` ignores any STT result that arrives while a reply is in flight. The agent finishes each turn before the participant can speak again.
 
-On disconnect the session is marked completed and a signed HMAC-SHA256 callback is POSTed to the `callback_url` supplied at session creation.
+**Browser-side messages:** in addition to raw PCM audio, the `/ws/{id}` socket emits JSON envelopes:
+
+| Type | Payload | Effect on the page |
+|---|---|---|
+| `transcript` | `{"role":"agent"\|"customer","text":"..."}` | renders a chat bubble |
+| `agent_speaking` | `{"speaking": true\|false}` | locks/unlocks the mic input |
+| `session_end` | `{}` | closes the session UI |
+| `error` | `{"message": "..."}` | shows the error banner |
+
+On disconnect the session is marked completed and a signed HMAC-SHA256 callback is POSTed to the `callback_url` supplied at session creation. The Next.js `/api/voice/callback` route verifies the `X-Signature` header, updates the matching `calls` row, and inserts a `transcripts` row.
 
 ---
 
@@ -236,15 +307,17 @@ On disconnect the session is marked completed and a signed HMAC-SHA256 callback 
 voicecall-module/
 ├── main.py                  # FastAPI app — all HTTP + WebSocket routes
 ├── pipeline.py              # Pipecat pipeline (VAD → STT → BackendRelay → TTS)
-├── session_manager.py       # Session lifecycle, agent WS relay, callbacks
+├── agent.py                 # ResearchOrchestrator — deterministic tracker + composer LLM
+├── agent_state.py           # QuestionTracker + question list from metadata
+├── agent_composer.py        # Single-call Ollama utterance composer
+├── session_manager.py       # Session lifecycle, agent WS relay, callbacks, agent task
 ├── config.py                # Env var loading
-├── models.py                # Pydantic models
-├── agent_test_client.py     # Simulated LLM backend for local testing
-├── dummy_responses.txt      # Replies cycled by agent_test_client.py
+├── models.py                # Pydantic models (CreateSessionRequest metadata documented here)
+├── agent_test_client.py     # LEGACY — manual smoke test for /agent/{id} WS protocol
+├── dummy_responses.txt      # LEGACY — replies cycled by agent_test_client.py
 ├── transcripts/             # Created automatically; one .txt per session
-│                            # agent_client.log written by agent_test_client.py
 ├── static/
-│   └── talk.html            # Browser voice UI (mic capture, TTS playback, barge-in)
-├── .env.example             # Env var template
+│   └── talk.html            # Browser voice UI (welcome → mic permission → half-duplex chat)
+├── .env.example             # Env var template (also accepts .env.local)
 └── requirements.txt
 ```

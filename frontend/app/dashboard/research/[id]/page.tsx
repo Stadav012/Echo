@@ -52,6 +52,8 @@ interface Call {
   completed_at: string | null;
   current_question_index: number;
   created_at: string;
+  contact_id: string | null;
+  session_id: string | null;
   transcripts: Transcript[];
 }
 
@@ -62,6 +64,13 @@ interface Contact {
   email: string | null;
   age: string | null;
   occupation: string | null;
+}
+
+interface ContactPortal {
+  status: "idle" | "loading" | "ready" | "error";
+  talkUrl?: string;
+  error?: string;
+  copied?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -220,6 +229,19 @@ export default function ResearchDetailPage() {
   const [callFilter,     setCallFilter]     = useState("all");
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [notFound,       setNotFound]       = useState(false);
+  const [contactPortals, setContactPortals] = useState<Record<string, ContactPortal>>({});
+  const [endingSessionId, setEndingSessionId] = useState<string | null>(null);
+
+  const refreshCalls = async (researchId: string) => {
+    const { data: callsData } = await supabase
+      .from("calls")
+      .select(
+        "*, transcripts(id, sentiment, excerpt, full_text, questions_count, created_at)"
+      )
+      .eq("research_campaign_id", researchId)
+      .order("created_at", { ascending: false });
+    setCalls((callsData as Call[] | null) ?? []);
+  };
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -237,14 +259,7 @@ export default function ResearchDetailPage() {
       if (error || !rc) { setNotFound(true); setLoading(false); return; }
       setResearch(rc);
 
-      if (rc.campaign_id) {
-        const { data: callsData } = await supabase
-          .from("calls")
-          .select("*, transcripts(id, sentiment, excerpt, full_text, questions_count, created_at)")
-          .eq("campaign_id", rc.campaign_id)
-          .order("created_at", { ascending: false });
-        setCalls(callsData ?? []);
-      }
+      await refreshCalls(rc.id);
 
       const { data: contactsData } = await supabase
         .from("contact_list")
@@ -257,6 +272,98 @@ export default function ResearchDetailPage() {
     };
     if (id) load();
   }, [id, router]);
+
+  const generatePortal = async (contactId: string) => {
+    if (!research) return;
+    setContactPortals((prev) => ({
+      ...prev,
+      [contactId]: { status: "loading" },
+    }));
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("You must be signed in.");
+      }
+      const res = await fetch("/api/voice/sessions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          research_campaign_id: research.id,
+          contact_id: contactId,
+        }),
+      });
+      const body = (await res.json()) as { talk_url?: string; error?: string };
+      if (!res.ok || !body.talk_url) {
+        throw new Error(body.error || `Request failed (${res.status}).`);
+      }
+      setContactPortals((prev) => ({
+        ...prev,
+        [contactId]: { status: "ready", talkUrl: body.talk_url },
+      }));
+      void refreshCalls(research.id);
+    } catch (error) {
+      setContactPortals((prev) => ({
+        ...prev,
+        [contactId]: {
+          status: "error",
+          error: error instanceof Error ? error.message : "Failed",
+        },
+      }));
+    }
+  };
+
+  const endLiveCall = async (sessionId: string, researchId: string) => {
+    setEndingSessionId(sessionId);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("You must be signed in.");
+      }
+      const res = await fetch(
+        `/api/voice/sessions/${encodeURIComponent(sessionId)}/end`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }
+      );
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error || `Request failed (${res.status}).`);
+      }
+      await refreshCalls(researchId);
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : "Failed to end call.");
+    } finally {
+      setEndingSessionId(null);
+    }
+  };
+
+  const copyToClipboard = async (contactId: string, url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setContactPortals((prev) => ({
+        ...prev,
+        [contactId]: { ...(prev[contactId] ?? { status: "ready" }), copied: true },
+      }));
+      setTimeout(() => {
+        setContactPortals((prev) => {
+          const current = prev[contactId];
+          if (!current) return prev;
+          return { ...prev, [contactId]: { ...current, copied: false } };
+        });
+      }, 1800);
+    } catch {
+      // clipboard write failed; leave state unchanged
+    }
+  };
 
   // ── Update status ──────────────────────────────────────────────────────────
   const updateStatus = async (newStatus: string) => {
@@ -293,6 +400,12 @@ export default function ResearchDetailPage() {
   const sentNeu        = allTranscripts.filter(t => t.sentiment === "neutral").length;
   const sentNeg        = allTranscripts.filter(t => t.sentiment === "negative").length;
   const filteredCalls  = callFilter === "all" ? calls : calls.filter(c => c.status === callFilter);
+  const callsByContact = new Map<string, Call>();
+  for (const call of calls) {
+    if (call.contact_id && !callsByContact.has(call.contact_id)) {
+      callsByContact.set(call.contact_id, call);
+    }
+  }
   const daysLeft       = Math.max(0, Math.ceil(
     (new Date(research.timeline_end).getTime() - Date.now()) / 86400000
   ));
@@ -647,26 +760,125 @@ export default function ResearchDetailPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  {["Name", "Phone", "Email", "Age", "Occupation"].map(h => (
+                  {["Name", "Phone", "Email", "Occupation", "Call Portal"].map(h => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {contacts.map(contact => (
-                  <tr key={contact.id} className="table-row-interactive">
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <Avatar name={contact.name} />
-                        <span className="participant-name">{contact.name}</span>
-                      </div>
-                    </td>
-                    <td className="text-secondary">{contact.phone ?? "—"}</td>
-                    <td className="text-secondary">{contact.email ?? "—"}</td>
-                    <td className="text-secondary">{contact.age ?? "—"}</td>
-                    <td className="text-secondary">{contact.occupation ?? "—"}</td>
-                  </tr>
-                ))}
+                {contacts.map(contact => {
+                  const portal = contactPortals[contact.id];
+                  const latestCall = callsByContact.get(contact.id);
+                  const portalUrl = portal?.talkUrl ?? null;
+                  const callStatus = (latestCall?.status || "").toLowerCase();
+                  const canEndLiveCall =
+                    Boolean(latestCall?.session_id) &&
+                    !["completed", "expired", "missed", "failed"].includes(callStatus);
+                  return (
+                    <tr key={contact.id} className="table-row-interactive">
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <Avatar name={contact.name} />
+                          <span className="participant-name">{contact.name}</span>
+                        </div>
+                      </td>
+                      <td className="text-secondary">{contact.phone ?? "—"}</td>
+                      <td className="text-secondary">{contact.email ?? "—"}</td>
+                      <td className="text-secondary">{contact.occupation ?? "—"}</td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                          {portalUrl ? (
+                            <>
+                              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: "4px 10px", fontSize: 12 }}
+                                  onClick={() => copyToClipboard(contact.id, portalUrl)}
+                                >
+                                  {portal?.copied ? "Copied" : "Copy link"}
+                                </button>
+                                <a
+                                  href={portalUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="btn btn-ghost"
+                                  style={{ padding: "4px 10px", fontSize: 12 }}
+                                >
+                                  Open
+                                </a>
+                                {canEndLiveCall && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary"
+                                      style={{ padding: "4px 10px", fontSize: 12 }}
+                                      disabled={endingSessionId === latestCall.session_id}
+                                      onClick={() =>
+                                        endLiveCall(latestCall.session_id!, research.id)
+                                      }
+                                    >
+                                      {endingSessionId === latestCall.session_id
+                                        ? "Ending…"
+                                        : "End call"}
+                                    </button>
+                                  )}
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost"
+                                  style={{ padding: "4px 10px", fontSize: 12 }}
+                                  onClick={() => generatePortal(contact.id)}
+                                >
+                                  New link
+                                </button>
+                              </div>
+                              <span
+                                className="text-muted"
+                                style={{ fontSize: 11, wordBreak: "break-all" }}
+                              >
+                                {portalUrl}
+                              </span>
+                            </>
+                          ) : (
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ padding: "4px 12px", fontSize: 12 }}
+                                disabled={portal?.status === "loading"}
+                                onClick={() => generatePortal(contact.id)}
+                              >
+                                {portal?.status === "loading" ? "Generating..." : "Generate call link"}
+                              </button>
+                              {latestCall && (
+                                <Badge value={latestCall.status} />
+                              )}
+                              {canEndLiveCall && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ padding: "4px 12px", fontSize: 12 }}
+                                  disabled={endingSessionId === latestCall!.session_id}
+                                  onClick={() =>
+                                    endLiveCall(latestCall!.session_id!, research.id)
+                                  }
+                                >
+                                  {endingSessionId === latestCall!.session_id
+                                    ? "Ending..."
+                                    : "End call"}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {portal?.status === "error" && (
+                            <span className="text-error" style={{ fontSize: 11 }}>
+                              {portal.error ?? "Failed to generate"}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
