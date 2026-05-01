@@ -1,0 +1,6 @@
+[2026-04-30T19:05:39Z] SYSTEM: Session started — customer_id=6024576b-6c26-41a2-8615-e0afe439ac29 name=Emma Brooks
+[2026-04-30T19:05:41Z] AGENT: Sorry, could you say that again?
+[2026-04-30T19:05:53Z] CUSTOMER: Hi.
+[2026-04-30T19:05:54Z] AGENT: Sorry, could you say that again?
+[2026-04-30T19:06:03Z] CUSTOMER: Hi.
+[2026-04-30T19:06:05Z] AGENT: Sorry, could you say that again?

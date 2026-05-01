@@ -1,0 +1,4 @@
+[2026-04-30T19:33:00Z] SYSTEM: Session started — customer_id=6024576b-6c26-41a2-8615-e0afe439ac29 name=Emma Brooks
+[2026-04-30T19:33:05Z] AGENT: Hi Emma, thanks for joining our conversation today! This is the User Onboarding Drop-Off Study. My name is Rachel, and I'll be guiding you through this discussion.
+[2026-04-30T19:33:17Z] CUSTOMER: Okay.
+[2026-04-30T19:33:18Z] AGENT: So, let's start with your first day using the product - what was it like?

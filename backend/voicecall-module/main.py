@@ -93,7 +93,10 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
 
     await websocket.accept()
     await session_manager.update_status(session_id, "active")
+    session_manager.register_browser_ws(session_id, websocket)
     logger.info("WebSocket accepted for session %s", session_id)
+
+    asyncio.create_task(session_manager.kickoff_agent(session_id))
 
     try:
         await run_pipeline(session, websocket, session_manager)
@@ -102,11 +105,40 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
     except Exception as exc:
         logger.exception("Unhandled WS error for session %s: %s", session_id, exc)
     finally:
+        session_manager.unregister_browser_ws(session_id)
         current = await session_manager.get_session(session_id)
         if current and current.status not in ("completed", "expired"):
             await session_manager.update_status(session_id, "completed")
             await session_manager.send_callback(session_id)
         session_manager.remove_pipeline(session_id)
+
+
+@app.post("/sessions/{session_id}/end")
+async def end_session_route(
+    session_id: str,
+    x_api_key: str = Header(default=""),
+) -> dict:
+    """Force-end a live voice session (researcher dashboard)."""
+    _require_api_key(x_api_key)
+    session = await session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status in ("completed", "expired"):
+        return {"ok": True, "status": session.status}
+    await session_manager.end_session(session_id, "researcher", force_cancel=True)
+    return {"ok": True, "status": "completed"}
+
+
+@app.post("/sessions/{session_id}/participant_end")
+async def participant_end_route(session_id: str) -> dict:
+    """Participant hang-up from talk.html. No API key — same trust as /talk/{id}."""
+    session = await session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status in ("completed", "expired"):
+        return {"ok": True, "status": session.status}
+    await session_manager.end_session(session_id, "participant", force_cancel=True)
+    return {"ok": True, "status": "completed"}
 
 
 @app.websocket("/agent/{session_id}")
@@ -138,7 +170,11 @@ async def agent_ws_endpoint(websocket: WebSocket, session_id: str) -> None:
     try:
         async for msg in websocket.iter_json():
             if msg.get("type") == "response" and msg.get("text"):
-                session_manager.put_agent_response(session_id, msg["text"])
+                session_manager.put_agent_response(
+                    session_id,
+                    msg["text"],
+                    end_after=bool(msg.get("end_after")),
+                )
     except WebSocketDisconnect:
         logger.info("Agent WS disconnected for session %s", session_id)
     except Exception as exc:

@@ -1,0 +1,26 @@
+[2026-04-30T19:42:39Z] SYSTEM: Session started — customer_id=6024576b-6c26-41a2-8615-e0afe439ac29 name=Emma Brooks
+[2026-04-30T19:42:45Z] AGENT: Hello Emma, it's great to finally have you on the line! My name is Rachel, and this conversation is about your experience with our product as a customer success associate. We're really interested in understanding why you abandoned onboarding on day one and what guidance would help you get more engaged with the platform sooner.
+[2026-04-30T19:43:08Z] CUSTOMER: So it was because it wasn't just working for me.
+[2026-04-30T19:43:09Z] AGENT: You found that it took too long to figure out how everything worked, especially when you first started using it. You mentioned that it felt like there were a lot of different features and settings that needed to be navigated, which made it hard to get started with the day's tasks. Is that right?
+[2026-04-30T19:43:27Z] CUSTOMER: Yes. There was a lot of features was bloated. The manual was
+[2026-04-30T19:43:29Z] AGENT: It seemed really overwhelming and confusing, especially when you first opened up the manual. You mentioned that it just didn't give you enough clear instructions on how to use everything, which made it hard for you to get started with day one tasks. Did the manual's length or complexity contribute to your feeling of being lost?
+[2026-04-30T19:43:48Z] CUSTOMER: Yes. The manual was very long.
+[2026-04-30T19:43:50Z] AGENT: You felt like there just wasn't a lot of guidance or direction in the manual, which meant that you had to figure out everything on your own without any clear next steps or examples. Was it frustrating for you when you didn't know what to do next?
+[2026-04-30T19:44:05Z] CUSTOMER: Very frustrating
+[2026-04-30T19:44:07Z] AGENT: It sounds like you were really eager to start using the product and getting things done, but instead, you felt like you were stuck in a cycle of uncertainty and confusion. Did you feel more confident or less uncertain after watching a video tutorial or seeing some help from an admin?
+[2026-04-30T19:44:25Z] CUSTOMER: Yes. I viewed video tutorial helped.
+[2026-04-30T19:44:27Z] AGENT: Seeing a video tutorial gave you some clarity on how to use the product, which is really helpful when you're just starting out. You mentioned that it was nice to see someone else's workflow and get a better understanding of what would be involved in completing tasks. Was there anything in particular that stood out about the video tutorial or made an impact on your experience?
+[2026-04-30T19:44:50Z] CUSTOMER: Yes. So it was the
+[2026-04-30T19:44:51Z] AGENT: The way the tutorial broke down complex steps into smaller, manageable chunks really helped you to understand how everything fit together and what steps were necessary for each task. Was there anything else that would have given you even more confidence in using the product after day one?
+[2026-04-30T19:45:09Z] CUSTOMER: Yeah. I guess
+[2026-04-30T19:45:11Z] AGENT: You mentioned "yeah" a few times earlier, so it seems like you're just feeling a bit uncertain about everything right now! But seriously, having guidance and nudges to help you get started and stay on track would have been really helpful in the beginning. Did anything stand out as something that could have helped you move more quickly through the setup process?
+[2026-04-30T19:45:30Z] CUSTOMER: A shorter manual.
+[2026-04-30T19:45:31Z] AGENT: You mentioned earlier that a shorter manual would have been really helpful, which suggests to me that you felt like it was too long and overwhelming at first. Is there one specific thing that you wish you had seen in the manual that would have made onboarding easier for you?
+[2026-04-30T19:45:47Z] CUSTOMER: How to combine the legs.
+[2026-04-30T19:45:48Z] AGENT: It sounds like you wanted a more concise way of explaining how to integrate different features or modules within the platform, and it ended up feeling overwhelming to figure out how everything fit together. Did something specific about that process stand out as particularly confusing for you?
+[2026-04-30T19:46:07Z] CUSTOMER: Yes. The long manual.
+[2026-04-30T19:46:08Z] AGENT: You mentioned earlier that a longer manual would have been less intimidating and easier to understand. It seems like the manual did the opposite, feeling too long and overwhelming at times. Is it possible that you were expecting something more straightforward or intuitive when it came to how to combine different features?
+[2026-04-30T19:46:28Z] CUSTOMER: Okay. I think this is it. I think we're done. Let's end the call.
+[2026-04-30T19:46:30Z] AGENT: It was great chatting with you, Emma! Thanks for sharing your thoughts and experiences with us about our product. You've given us a lot of valuable insights that will help us improve onboarding and make it easier for others to get started.
+[2026-04-30T19:46:44Z] CUSTOMER: You're welcome.
+[2026-04-30T19:46:45Z] AGENT: You're welcome, Emma. It was a pleasure talking to you. Have a great day, and we'll talk soon about next steps!

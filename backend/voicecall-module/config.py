@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+_HERE = Path(__file__).parent
+load_dotenv(_HERE / ".env.local", override=False)
+load_dotenv(_HERE / ".env", override=False)
 
 
 def _require(key: str) -> str:
@@ -19,22 +23,13 @@ DEEPGRAM_API_KEY: str = _require("DEEPGRAM_API_KEY")
 CARTESIA_API_KEY: str = _require("CARTESIA_API_KEY")
 CARTESIA_VOICE_ID: str = _require("CARTESIA_VOICE_ID")
 CARTESIA_MODEL: str = _optional("CARTESIA_MODEL", "sonic-2")
-OPENAI_API_KEY: str = _optional("OPENAI_API_KEY")
-ANTHROPIC_API_KEY: str = _optional("ANTHROPIC_API_KEY")
-GEMINI_API_KEY: str = _optional("GEMINI_API_KEY")
-LLM_PROVIDER: str = _optional("LLM_PROVIDER", "openai_compatible")
 
-# In-process interview model settings.
-# For Gemini using the OpenAI-compatible endpoint:
-#   LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-#   LLM_MODEL=gemini-2.5-flash
-#   LLM_API_KEY=<your GEMINI_API_KEY>
-LLM_BASE_URL: str = _optional(
-    "LLM_BASE_URL",
-    "https://generativelanguage.googleapis.com/v1beta/openai",
-).rstrip("/")
-LLM_MODEL: str = _optional("LLM_MODEL", "gemini-2.5-flash")
-LLM_API_KEY: str = _optional("LLM_API_KEY", GEMINI_API_KEY)
+# LLM backend used by ResearchAgent. Defaults to a local Ollama instance so the
+# voice service works offline without paid API credits. Any OpenAI-compatible
+# endpoint (Ollama, OpenRouter, OpenAI, vLLM) can be plugged in.
+LLM_BASE_URL: str = _optional("LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
+LLM_API_KEY: str = _optional("LLM_API_KEY", "ollama")
+LLM_MODEL: str = _optional("LLM_MODEL", "llama3.2:1b")
 
 BASE_URL: str = _optional("BASE_URL", "http://localhost:8000").rstrip("/")
 API_KEY: str = _require("API_KEY")
