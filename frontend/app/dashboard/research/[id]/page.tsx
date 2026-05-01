@@ -257,9 +257,10 @@ export default function ResearchDetailPage() {
         .single();
 
       if (error || !rc) { setNotFound(true); setLoading(false); return; }
-      setResearch(rc);
+      const researchCampaign = rc as ResearchCampaign;
+      setResearch(researchCampaign);
 
-      await refreshCalls(rc.id);
+      await refreshCalls(researchCampaign.id);
 
       const { data: contactsData } = await supabase
         .from("contact_list")

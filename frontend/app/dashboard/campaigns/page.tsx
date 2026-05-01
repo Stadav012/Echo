@@ -24,6 +24,12 @@ interface CallStats {
   avgDurationSeconds: number;
 }
 
+interface CampaignCallRow {
+  id: string;
+  status: string | null;
+  duration_seconds: number | null;
+}
+
 // ── Status config ─────────────────────────────────────────────────────────────
 const statusConfig: Record<string, { label: string; className: string; dotClass: string }> = {
   active:    { label: "Active",    className: "badge-success", dotClass: "status-dot-active"   },
@@ -102,9 +108,10 @@ export default function CampaignsPage() {
               .select("id, status, duration_seconds")
               .eq("campaign_id", c.campaign_id!);
 
-            const total     = calls?.length ?? 0;
-            const completed = calls?.filter(cl => cl.status === "completed").length ?? 0;
-            const totalSecs = calls?.reduce((sum, cl) => sum + (cl.duration_seconds ?? 0), 0) ?? 0;
+            const callRows = (calls as CampaignCallRow[] | null) ?? [];
+            const total     = callRows.length;
+            const completed = callRows.filter((cl) => cl.status === "completed").length;
+            const totalSecs = callRows.reduce((sum, cl) => sum + (cl.duration_seconds ?? 0), 0);
             const avgSecs   = completed > 0 ? Math.round(totalSecs / completed) : 0;
 
             stats[c.id] = { total, completed, avgDurationSeconds: avgSecs };
