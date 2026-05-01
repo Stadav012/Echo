@@ -32,6 +32,7 @@ type TranscriptItem = {
   questions: number;
   sentiment: "positive" | "neutral" | "negative" | "unknown";
   excerpt: string;
+  fullText: string;
 };
 
 const sentimentConfig: Record<
@@ -65,6 +66,9 @@ export default function TranscriptsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
+  const [selectedTranscript, setSelectedTranscript] = useState<TranscriptItem | null>(
+    null
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -102,6 +106,8 @@ export default function TranscriptsPage() {
             t.excerpt?.trim() ||
             t.full_text?.trim().slice(0, 220) ||
             "No excerpt available.";
+          const fullText =
+            t.full_text?.trim() || t.excerpt?.trim() || "No full transcript available.";
           mapped.push({
             id: t.id,
             participant: (call.participant_name || "Unknown Participant").trim(),
@@ -112,6 +118,7 @@ export default function TranscriptsPage() {
             questions: t.questions_count ?? 0,
             sentiment: t.sentiment ?? "unknown",
             excerpt,
+            fullText,
           });
         }
       }
@@ -303,6 +310,7 @@ export default function TranscriptsPage() {
             key={transcript.id}
             className="card card-interactive"
             style={{ padding: "20px 24px", cursor: "pointer" }}
+            onClick={() => setSelectedTranscript(transcript)}
           >
             <div style={{ display: "flex", gap: "16px" }}>
               {/* Avatar */}
@@ -445,6 +453,82 @@ export default function TranscriptsPage() {
           </div>
         ))}
       </div>
+
+      {/* Full transcript modal */}
+      {selectedTranscript && (
+        <div
+          onClick={() => setSelectedTranscript(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.48)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 70,
+            padding: "20px",
+          }}
+        >
+          <div
+            className="card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(900px, 100%)",
+              maxHeight: "88vh",
+              padding: "22px 24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "14px",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: "12px",
+              }}
+            >
+              <div>
+                <div
+                  style={{ fontSize: "17px", fontWeight: 700, color: "var(--text-primary)" }}
+                >
+                  {selectedTranscript.participant}
+                </div>
+                <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "4px" }}>
+                  {selectedTranscript.campaign} · {selectedTranscript.date} ·{" "}
+                  {selectedTranscript.duration} · {selectedTranscript.questions}q
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ padding: "6px 10px", fontSize: "12px" }}
+                onClick={() => setSelectedTranscript(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid var(--border-light)",
+                borderRadius: "10px",
+                background: "var(--bg-base)",
+                padding: "14px 16px",
+                overflowY: "auto",
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.7,
+                fontSize: "14px",
+                color: "var(--text-secondary)",
+              }}
+            >
+              {selectedTranscript.fullText}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
