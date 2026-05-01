@@ -812,12 +812,12 @@ export default function ResearchDetailPage() {
                                       type="button"
                                       className="btn btn-secondary"
                                       style={{ padding: "4px 10px", fontSize: 12 }}
-                                      disabled={endingSessionId === latestCall.session_id}
+                                      disabled={endingSessionId === latestCall!.session_id}
                                       onClick={() =>
-                                        endLiveCall(latestCall.session_id!, research.id)
+                                        endLiveCall(latestCall!.session_id!, research.id)
                                       }
                                     >
-                                      {endingSessionId === latestCall.session_id
+                                      {endingSessionId === latestCall!.session_id
                                         ? "Ending…"
                                         : "End call"}
                                     </button>

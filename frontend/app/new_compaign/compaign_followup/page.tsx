@@ -3,6 +3,7 @@
 import {
   FormEvent,
   KeyboardEvent,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -116,7 +117,7 @@ function ArrowLeftIcon() {
   );
 }
 
-export default function CampaignFollowupPage() {
+function CampaignFollowupPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const researchId = searchParams.get("researchId");
@@ -949,5 +950,28 @@ export default function CampaignFollowupPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CampaignFollowupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div
+          className="animate-fade-in"
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--text-muted)",
+          }}
+        >
+          Loading…
+        </div>
+      }
+    >
+      <CampaignFollowupPageContent />
+    </Suspense>
   );
 }
