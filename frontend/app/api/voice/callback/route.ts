@@ -76,6 +76,53 @@ function summariseTranscript(turns: TranscriptTurn[]): {
   return { fullText, excerpt, questionsCount, durationSeconds };
 }
 
+function inferSentiment(
+  turns: TranscriptTurn[]
+): "positive" | "neutral" | "negative" | null {
+  const participantText = turns
+    .filter((t) => t.role?.toLowerCase() === "participant" && t.text?.trim())
+    .map((t) => t.text.trim().toLowerCase())
+    .join(" ");
+  if (!participantText) return null;
+
+  const positiveWords = [
+    "good",
+    "great",
+    "easy",
+    "helpful",
+    "smooth",
+    "love",
+    "liked",
+    "useful",
+    "clear",
+    "fast",
+  ];
+  const negativeWords = [
+    "bad",
+    "hard",
+    "difficult",
+    "confusing",
+    "slow",
+    "frustrating",
+    "hate",
+    "issue",
+    "problem",
+    "bug",
+  ];
+
+  let score = 0;
+  for (const word of positiveWords) {
+    if (participantText.includes(word)) score += 1;
+  }
+  for (const word of negativeWords) {
+    if (participantText.includes(word)) score -= 1;
+  }
+
+  if (score > 0) return "positive";
+  if (score < 0) return "negative";
+  return "neutral";
+}
+
 export async function POST(req: NextRequest) {
   const secret = process.env.VOICE_SERVICE_CALLBACK_SECRET;
   if (!secret) {
@@ -171,12 +218,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (summary.fullText.length > 0) {
+    const inferredSentiment = inferSentiment(payload.transcript ?? []);
     const { error: transcriptErr } = await supabase.from("transcripts").insert({
       call_id: callRow.id,
       full_text: summary.fullText,
       excerpt: summary.excerpt || null,
       questions_count: summary.questionsCount,
-      sentiment: null,
+      sentiment: inferredSentiment,
     });
     if (transcriptErr) {
       return NextResponse.json(

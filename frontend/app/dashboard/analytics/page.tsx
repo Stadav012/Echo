@@ -20,6 +20,8 @@ type CallRow = {
 
 type TranscriptRow = {
   sentiment: "positive" | "neutral" | "negative" | null;
+  excerpt?: string | null;
+  full_text?: string | null;
 };
 
 type CampaignPerf = {
@@ -58,6 +60,49 @@ function startOfDay(d: Date): Date {
   const out = new Date(d);
   out.setHours(0, 0, 0, 0);
   return out;
+}
+
+function inferSentimentFromText(
+  text: string | null | undefined
+): "positive" | "neutral" | "negative" | null {
+  const normalized = (text || "").trim().toLowerCase();
+  if (!normalized) return null;
+  const positiveWords = [
+    "good",
+    "great",
+    "easy",
+    "helpful",
+    "smooth",
+    "love",
+    "liked",
+    "useful",
+    "clear",
+    "fast",
+  ];
+  const negativeWords = [
+    "bad",
+    "hard",
+    "difficult",
+    "confusing",
+    "slow",
+    "frustrating",
+    "hate",
+    "issue",
+    "problem",
+    "bug",
+  ];
+
+  let score = 0;
+  for (const word of positiveWords) {
+    if (normalized.includes(word)) score += 1;
+  }
+  for (const word of negativeWords) {
+    if (normalized.includes(word)) score -= 1;
+  }
+
+  if (score > 0) return "positive";
+  if (score < 0) return "negative";
+  return "neutral";
 }
 
 export default function AnalyticsPage() {
@@ -124,7 +169,7 @@ export default function AnalyticsPage() {
       const { data: callsData, error: callsError } = await supabase
         .from("calls")
         .select(
-          "id, research_campaign_id, status, duration_seconds, created_at, transcripts(sentiment)"
+          "id, research_campaign_id, status, duration_seconds, created_at, transcripts(sentiment, excerpt, full_text)"
         )
         .in("research_campaign_id", campaignIds);
 
@@ -168,9 +213,13 @@ export default function AnalyticsPage() {
 
       const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
       for (const t of transcripts) {
-        if (t.sentiment === "positive") sentimentCounts.positive += 1;
-        if (t.sentiment === "neutral") sentimentCounts.neutral += 1;
-        if (t.sentiment === "negative") sentimentCounts.negative += 1;
+        const resolvedSentiment =
+          t.sentiment ??
+          inferSentimentFromText(t.full_text) ??
+          inferSentimentFromText(t.excerpt);
+        if (resolvedSentiment === "positive") sentimentCounts.positive += 1;
+        if (resolvedSentiment === "neutral") sentimentCounts.neutral += 1;
+        if (resolvedSentiment === "negative") sentimentCounts.negative += 1;
       }
       const sentimentTotal =
         sentimentCounts.positive + sentimentCounts.neutral + sentimentCounts.negative;
@@ -228,9 +277,13 @@ export default function AnalyticsPage() {
         const tx = call.transcripts ?? [];
         if (tx.length > 0) bucket.transcripted += 1;
         for (const t of tx) {
-          if (t.sentiment === "positive") bucket.positive += 1;
-          if (t.sentiment === "neutral") bucket.neutral += 1;
-          if (t.sentiment === "negative") bucket.negative += 1;
+          const resolvedSentiment =
+            t.sentiment ??
+            inferSentimentFromText(t.full_text) ??
+            inferSentimentFromText(t.excerpt);
+          if (resolvedSentiment === "positive") bucket.positive += 1;
+          if (resolvedSentiment === "neutral") bucket.neutral += 1;
+          if (resolvedSentiment === "negative") bucket.negative += 1;
         }
         perfByCampaign.set(cid, bucket);
       }
