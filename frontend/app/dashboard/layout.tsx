@@ -22,7 +22,6 @@ const navItems = [
     href: "/dashboard/calls",
     label: "Live Calls",
     icon: "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z",
-    badge: 3,
   },
   {
     href: "/dashboard/transcripts",
@@ -63,6 +62,7 @@ export default function DashboardLayout({
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [liveCallsCount, setLiveCallsCount] = useState(0);
   const [isCreateCampaignOpen, setIsCreateCampaignOpen] = useState(false);
 
   useEffect(() => {
@@ -83,6 +83,26 @@ export default function DashboardLayout({
         .single();
 
       if (profileData) setProfile(profileData);
+
+      const { data: campaignRows } = await supabase
+        .from("research_campaigns")
+        .select("id")
+        .eq("user_id", session.user.id);
+
+      const campaignIds =
+        (campaignRows as Array<{ id: string }> | null)?.map((row) => row.id) ?? [];
+      if (campaignIds.length === 0) {
+        setLiveCallsCount(0);
+        return;
+      }
+
+      const { count } = await supabase
+        .from("calls")
+        .select("id", { count: "exact", head: true })
+        .in("research_campaign_id", campaignIds)
+        .in("status", ["active", "in-progress", "ringing"]);
+
+      setLiveCallsCount(count ?? 0);
     };
     fetchUser();
   }, [router]);
@@ -225,7 +245,9 @@ export default function DashboardLayout({
                   <path d={item.icon} />
                 </svg>
                 {!collapsed && <span>{item.label}</span>}
-                {!collapsed && item.badge && (
+                {!collapsed &&
+                  item.href === "/dashboard/calls" &&
+                  liveCallsCount > 0 && (
                   <span
                     style={{
                       marginLeft: "auto",
@@ -239,7 +261,7 @@ export default function DashboardLayout({
                       textAlign: "center",
                     }}
                   >
-                    {item.badge}
+                    {liveCallsCount}
                   </span>
                 )}
               </Link>
