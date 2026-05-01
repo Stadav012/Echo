@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { OpenRouter } from "@openrouter/sdk";
 
 import {
   MAX_QUESTIONS,
@@ -33,6 +32,10 @@ type ModelMessage = {
   content: string;
 };
 
+type ChatCompletionResponse = {
+  choices?: Array<{ message?: { content?: string | null } }>;
+};
+
 function parseModelJson(raw: string): Record<string, unknown> | null {
   try {
     return JSON.parse(raw) as Record<string, unknown>;
@@ -51,12 +54,55 @@ function parseModelJson(raw: string): Record<string, unknown> | null {
   }
 }
 
-function getOpenRouter(): OpenRouter {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+function shouldUseGemini(): boolean {
+  if (process.env.LLM_PROVIDER?.toLowerCase() === "gemini") return true;
+  return Boolean(process.env.GEMINI_API_KEY) && !process.env.OPENROUTER_API_KEY;
+}
+
+async function sendChatCompletion(
+  messages: ModelMessage[],
+  temperature: number
+): Promise<string> {
+  const useGemini = shouldUseGemini();
+  const endpoint = useGemini
+    ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    : "https://openrouter.ai/api/v1/chat/completions";
+  const apiKey = useGemini
+    ? process.env.GEMINI_API_KEY
+    : process.env.OPENROUTER_API_KEY;
+  const model = useGemini
+    ? process.env.GEMINI_MODEL || "gemini-2.5-flash"
+    : process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free";
+
   if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY is not configured on the server.");
+    throw new Error(
+      useGemini
+        ? "GEMINI_API_KEY is not configured on the server."
+        : "OPENROUTER_API_KEY is not configured on the server."
+    );
   }
-  return new OpenRouter({ apiKey });
+
+  const resp = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      response_format: { type: "json_object" },
+      temperature,
+    }),
+  });
+
+  const rawBody = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`LLM request failed (${resp.status}): ${rawBody}`);
+  }
+
+  const json = JSON.parse(rawBody) as ChatCompletionResponse;
+  return json.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
 export async function POST(req: NextRequest) {
@@ -83,22 +129,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let openrouter: OpenRouter;
-  try {
-    openrouter = getOpenRouter();
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "OpenRouter is not ready.",
-      },
-      { status: 500 }
-    );
-  }
-
-  const model =
-    process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free";
-
   const systemPrompt = buildSystemPrompt({
     phase,
     ctx: campaignContext,
@@ -120,16 +150,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const completion = await openrouter.chat.send({
-      chatRequest: {
-        model,
-        messages,
-        response_format: { type: "json_object" },
-        temperature: 0.7,
-      },
-    });
-
-    const raw = completion.choices[0]?.message?.content ?? "";
+    const raw = await sendChatCompletion(messages, 0.7);
     const parsed = parseModelJson(raw) as
       | (Partial<TurnResponse> & { message?: string })
       | null;
@@ -158,7 +179,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(responseBody);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "OpenRouter request failed.";
+      error instanceof Error ? error.message : "LLM request failed.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

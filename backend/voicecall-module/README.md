@@ -44,6 +44,13 @@ CARTESIA_VOICE_ID=<voice ID from Cartesia Voice Library>
 BASE_URL=http://localhost:8000
 API_KEY=any-secret-you-choose
 CALLBACK_SECRET=any-secret-you-choose
+
+# In-process LLM (Gemini via OpenAI-compatible endpoint)
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+LLM_MODEL=gemini-2.5-flash
+LLM_API_KEY=<your Gemini API key>
+# Optional convenience mirror:
+# GEMINI_API_KEY=<same key as above>
 ```
 
 > `CARTESIA_MODEL` defaults to `sonic-2` if left blank.  

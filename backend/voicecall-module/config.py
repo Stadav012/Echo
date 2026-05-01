@@ -21,7 +21,20 @@ CARTESIA_VOICE_ID: str = _require("CARTESIA_VOICE_ID")
 CARTESIA_MODEL: str = _optional("CARTESIA_MODEL", "sonic-2")
 OPENAI_API_KEY: str = _optional("OPENAI_API_KEY")
 ANTHROPIC_API_KEY: str = _optional("ANTHROPIC_API_KEY")
-LLM_PROVIDER: str = _optional("LLM_PROVIDER", "openai")
+GEMINI_API_KEY: str = _optional("GEMINI_API_KEY")
+LLM_PROVIDER: str = _optional("LLM_PROVIDER", "openai_compatible")
+
+# In-process interview model settings.
+# For Gemini using the OpenAI-compatible endpoint:
+#   LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+#   LLM_MODEL=gemini-2.5-flash
+#   LLM_API_KEY=<your GEMINI_API_KEY>
+LLM_BASE_URL: str = _optional(
+    "LLM_BASE_URL",
+    "https://generativelanguage.googleapis.com/v1beta/openai",
+).rstrip("/")
+LLM_MODEL: str = _optional("LLM_MODEL", "gemini-2.5-flash")
+LLM_API_KEY: str = _optional("LLM_API_KEY", GEMINI_API_KEY)
 
 BASE_URL: str = _optional("BASE_URL", "http://localhost:8000").rstrip("/")
 API_KEY: str = _require("API_KEY")
