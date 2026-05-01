@@ -315,8 +315,8 @@ async def create_pipeline_task(
         live_options=LiveOptions(
             language="en",
             model="nova-2",
-            endpointing=2500,
-            utterance_end_ms=3000,
+            endpointing=3200,
+            utterance_end_ms=4200,
             smart_format=True,
             interim_results=True,
         ),
@@ -335,7 +335,7 @@ async def create_pipeline_task(
             params=VADParams(
                 confidence=0.55,
                 start_secs=0.4,
-                stop_secs=1.8,
+                stop_secs=2.3,
                 min_volume=0.3,
             )
         )

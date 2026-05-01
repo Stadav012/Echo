@@ -59,50 +59,91 @@ function shouldUseGemini(): boolean {
   return Boolean(process.env.GEMINI_API_KEY) && !process.env.OPENROUTER_API_KEY;
 }
 
+function shouldUseQwen(): boolean {
+  return process.env.LLM_PROVIDER?.toLowerCase() === "qwen";
+}
+
 async function sendChatCompletion(
   messages: ModelMessage[],
   temperature: number
 ): Promise<string> {
-  const useGemini = shouldUseGemini();
-  const endpoint = useGemini
-    ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-    : "https://openrouter.ai/api/v1/chat/completions";
-  const apiKey = useGemini
-    ? process.env.GEMINI_API_KEY
-    : process.env.OPENROUTER_API_KEY;
-  const model = useGemini
-    ? process.env.GEMINI_MODEL || "gemini-2.5-flash"
-    : process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free";
+  const qwenKey = process.env.QWEN_API_KEY || process.env.qwen_api_key;
+  const providers = shouldUseQwen()
+    ? [
+        {
+          name: "qwen",
+          endpoint:
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+          apiKey: qwenKey,
+          model: process.env.QWEN_MODEL || "qwen-vl-max",
+        },
+        {
+          name: "gemini",
+          endpoint:
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+          apiKey: process.env.GEMINI_API_KEY,
+          model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+        },
+      ]
+    : shouldUseGemini()
+      ? [
+          {
+            name: "gemini",
+            endpoint:
+              "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            apiKey: process.env.GEMINI_API_KEY,
+            model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+          },
+          {
+            name: "openrouter",
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            apiKey: process.env.OPENROUTER_API_KEY,
+            model:
+              process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free",
+          },
+        ]
+      : [
+          {
+            name: "openrouter",
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            apiKey: process.env.OPENROUTER_API_KEY,
+            model:
+              process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free",
+          },
+          {
+            name: "gemini",
+            endpoint:
+              "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            apiKey: process.env.GEMINI_API_KEY,
+            model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+          },
+        ];
 
-  if (!apiKey) {
-    throw new Error(
-      useGemini
-        ? "GEMINI_API_KEY is not configured on the server."
-        : "OPENROUTER_API_KEY is not configured on the server."
-    );
+  let lastError = "No provider configured.";
+  for (const provider of providers) {
+    if (!provider.apiKey) continue;
+    const resp = await fetch(provider.endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${provider.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages,
+        response_format: { type: "json_object" },
+        temperature,
+      }),
+    });
+    const rawBody = await resp.text();
+    if (!resp.ok) {
+      lastError = `${provider.name} failed (${resp.status}): ${rawBody}`;
+      continue;
+    }
+    const json = JSON.parse(rawBody) as ChatCompletionResponse;
+    return json.choices?.[0]?.message?.content?.trim() ?? "";
   }
-
-  const resp = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      response_format: { type: "json_object" },
-      temperature,
-    }),
-  });
-
-  const rawBody = await resp.text();
-  if (!resp.ok) {
-    throw new Error(`LLM request failed (${resp.status}): ${rawBody}`);
-  }
-
-  const json = JSON.parse(rawBody) as ChatCompletionResponse;
-  return json.choices?.[0]?.message?.content?.trim() ?? "";
+  throw new Error(lastError);
 }
 
 export async function POST(req: NextRequest) {

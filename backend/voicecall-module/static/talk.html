@@ -270,9 +270,11 @@
   let nextStartTime = 0;
   let agentSpeaking = false;        // true while we're playing TTS audio
   let agentLockHint = false;        // true between explicit speaking_start/end markers from server
+  let terminalState = null;         // 'done' | 'expired' once session reaches terminal UI
 
   // ---- UI helpers ----
   function setUIState(state) {
+    if (terminalState && state !== terminalState) return;
     viewWelcome.style.display      = 'none';
     viewConnecting.style.display   = 'none';
     permissionPrompt.style.display = 'none';
@@ -303,12 +305,20 @@
       viewActive.style.display = 'flex';
       activeStatusText.textContent = 'Connecting to the interviewer…';
     } else if (state === 'done') {
+      terminalState = 'done';
       statusCardEl.style.display = 'none';
       bannerDone.style.display   = 'block';
     } else if (state === 'expired') {
+      terminalState = 'expired';
       statusCardEl.style.display  = 'none';
       bannerExpired.style.display = 'block';
     }
+  }
+
+  function enterTerminalState(state) {
+    terminalState = state;
+    cleanup();
+    setUIState(state);
   }
 
   function showError(msg) {
@@ -361,12 +371,13 @@
       // it's done (agentLockHint=false); otherwise more TTS chunks are coming.
       if (nextStartTime <= audioCtx.currentTime + 0.05) {
         agentSpeaking = false;
-        if (!agentLockHint) setUIState('listening');
+        if (!agentLockHint && !terminalState) setUIState('listening');
       }
     };
   }
 
   function handleIncomingAudio(arrayBuffer) {
+    if (terminalState) return;
     if (!audioCtx) return;
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const float32 = pcmToFloat32(arrayBuffer);
@@ -441,6 +452,7 @@
           if (msg.type === 'transcript') {
             addBubble(msg.role, msg.text);
           } else if (msg.type === 'agent_speaking') {
+            if (terminalState) return;
             if (msg.speaking) {
               agentLockHint = true;
               setUIState('speaking');
@@ -453,8 +465,7 @@
               setUIState('listening');
             }
           } else if (msg.type === 'session_end') {
-            // Defer closing the socket so any final TTS chunks still in flight can play.
-            setTimeout(() => { cleanup(); setUIState('done'); }, 2800);
+            enterTerminalState('done');
           } else if (msg.type === 'error') {
             showError(msg.message || 'An error occurred.');
           }
@@ -467,6 +478,7 @@
     ws.onerror = () => showError('Connection error. Please refresh the page to try again.');
 
     ws.onclose = (e) => {
+      if (terminalState) return;
       cleanup();
       if (e.code === 4004) setUIState('expired');
       else                  setUIState('done');
@@ -476,6 +488,7 @@
   function cleanup() {
     stopMic();
     if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000);
+    ws = null;
   }
 
   // ---- Welcome → permission → mic → connect ----
@@ -489,8 +502,7 @@
     try {
       await fetch(`/sessions/${SESSION_ID}/participant_end`, { method: 'POST' });
     } catch (_) {}
-    cleanup();
-    setUIState('done');
+    enterTerminalState('done');
   });
 
   grantBtn.addEventListener('click', async () => {

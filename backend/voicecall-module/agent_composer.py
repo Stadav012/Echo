@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -94,27 +95,45 @@ async def call_llm(
     session_id: str,
     max_tokens: int = 180,
 ) -> str:
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": max_tokens,
-        "stream": False,
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key or 'none'}",
-        "Content-Type": "application/json",
-    }
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
+    async def _send_once(target_base_url: str, target_api_key: str, target_model: str) -> str:
+        url = f"{target_base_url.rstrip('/')}/chat/completions"
+        payload: dict[str, Any] = {
+            "model": target_model,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        headers = {
+            "Authorization": f"Bearer {target_api_key or 'none'}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        try:
+            return (data["choices"][0]["message"]["content"] or "").strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.warning("[%s] Unexpected LLM response shape: %s", session_id, data)
+            raise RuntimeError("invalid llm response") from exc
+
     try:
-        return (data["choices"][0]["message"]["content"] or "").strip()
-    except (KeyError, IndexError, TypeError) as exc:
-        logger.warning("[%s] Unexpected LLM response shape: %s", session_id, data)
-        raise RuntimeError("invalid llm response") from exc
+        return await _send_once(base_url, api_key, model)
+    except Exception as primary_exc:
+        fallback_base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+        fallback_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        fallback_api_key = os.getenv("GEMINI_API_KEY", "")
+        if not fallback_api_key:
+            raise
+        if base_url.rstrip("/") == fallback_base_url.rstrip("/"):
+            raise
+        logger.warning(
+            "[%s] Primary LLM request failed; retrying with Gemini fallback: %s",
+            session_id,
+            primary_exc,
+        )
+        return await _send_once(fallback_base_url, fallback_api_key, fallback_model)
 
 
 async def compose_kickoff(
