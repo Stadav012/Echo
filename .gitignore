@@ -13,6 +13,9 @@ dist/
 # Misc
 .DS_Store
 *.pem
+__pycache__/
+*.py[cod]
+backend/voicecall-module/transcripts/*.txt
 
 # Debug
 npm-debug.log*
