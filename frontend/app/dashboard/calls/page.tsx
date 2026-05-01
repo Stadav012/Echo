@@ -1,64 +1,174 @@
 "use client";
 
-const activeCalls = [
-  {
-    id: "c1",
-    participant: "Sarah Mitchell",
-    phone: "+1 (555) 234-5678",
-    campaign: "User Onboarding Study",
-    status: "in-progress",
-    duration: "4:23",
-    currentQuestion: "What was your first impression of the app?",
-    questionIndex: 3,
-    totalQuestions: 8,
-    consent: true,
-  },
-  {
-    id: "c2",
-    participant: "James Kim",
-    phone: "+1 (555) 345-6789",
-    campaign: "User Onboarding Study",
-    status: "in-progress",
-    duration: "2:10",
-    currentQuestion: "Can you describe any challenges you faced during sign-up?",
-    questionIndex: 2,
-    totalQuestions: 8,
-    consent: true,
-  },
-  {
-    id: "c3",
-    participant: "Maria López",
-    phone: "+44 7911 123456",
-    campaign: "Product Satisfaction Q2",
-    status: "in-progress",
-    duration: "8:45",
-    currentQuestion: "How would you rate your overall experience with our support team?",
-    questionIndex: 7,
-    totalQuestions: 12,
-    consent: true,
-  },
-];
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-const pendingCalls = [
-  { participant: "Ahmed Hassan", phone: "+1 (555) 456-7890", campaign: "User Onboarding Study", scheduledFor: "2:30 PM", status: "pending" },
-  { participant: "Lisa Chen", phone: "+1 (555) 567-8901", campaign: "User Onboarding Study", scheduledFor: "2:45 PM", status: "pending" },
-  { participant: "Tom Wilson", phone: "+44 7700 900000", campaign: "Product Satisfaction Q2", scheduledFor: "3:00 PM", status: "pending" },
-  { participant: "Priya Sharma", phone: "+91 98765 43210", campaign: "Product Satisfaction Q2", scheduledFor: "3:15 PM", status: "ringing" },
-];
+type CampaignRow = {
+  id: string;
+  title: string | null;
+};
 
-const recentCompleted = [
-  { participant: "David Brown", campaign: "User Onboarding Study", duration: "12:34", completedAt: "1:45 PM", status: "completed" },
-  { participant: "Emma Taylor", campaign: "Product Satisfaction Q2", duration: "9:22", completedAt: "1:30 PM", status: "completed" },
-  { participant: "Robert Chen", campaign: "User Onboarding Study", duration: "15:01", completedAt: "1:15 PM", status: "completed" },
-  { participant: "Ana García", campaign: "Product Satisfaction Q2", duration: "-", completedAt: "12:58 PM", status: "failed" },
-];
+type CallRow = {
+  id: string;
+  participant_name: string | null;
+  participant_phone: string | null;
+  research_campaign_id: string | null;
+  status: string | null;
+  duration_seconds: number | null;
+  current_question_index: number | null;
+  created_at: string;
+  scheduled_for: string | null;
+  completed_at: string | null;
+};
+
+type LiveCall = {
+  id: string;
+  participant: string;
+  phone: string;
+  campaign: string;
+  status: string;
+  duration: string;
+  currentQuestionIndex: number;
+  scheduledFor: string;
+  completedAt: string;
+};
+
+function fmtDuration(seconds: number | null): string {
+  if (!seconds || seconds <= 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function fmtElapsedSince(iso: string): string {
+  const created = new Date(iso).getTime();
+  const now = Date.now();
+  if (Number.isNaN(created) || created >= now) return "0:00";
+  return fmtDuration(Math.floor((now - created) / 1000));
+}
+
+function fmtTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 export default function LiveCallsPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [calls, setCalls] = useState<LiveCall[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        router.push("/auth/login");
+        return;
+      }
+
+      const { data: campaignsData, error: campaignsError } = await supabase
+        .from("research_campaigns")
+        .select("id, title")
+        .eq("user_id", session.user.id);
+
+      if (campaignsError) {
+        setError(campaignsError.message || "Failed to load campaigns.");
+        setLoading(false);
+        return;
+      }
+
+      const campaigns = (campaignsData as CampaignRow[] | null) ?? [];
+      const campaignNameById = new Map(
+        campaigns.map((c) => [c.id, c.title?.trim() || "Untitled Campaign"])
+      );
+
+      const campaignIds = campaigns.map((c) => c.id);
+      if (campaignIds.length === 0) {
+        setCalls([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data: callsData, error: callsError } = await supabase
+        .from("calls")
+        .select(
+          "id, participant_name, participant_phone, research_campaign_id, status, duration_seconds, current_question_index, created_at, scheduled_for, completed_at"
+        )
+        .in("research_campaign_id", campaignIds)
+        .order("created_at", { ascending: false });
+
+      if (callsError) {
+        setError(callsError.message || "Failed to load calls.");
+        setLoading(false);
+        return;
+      }
+
+      const mapped = ((callsData as CallRow[] | null) ?? []).map((call) => {
+        const status = (call.status || "unknown").toLowerCase();
+        const duration =
+          call.duration_seconds && call.duration_seconds > 0
+            ? fmtDuration(call.duration_seconds)
+            : status === "active" || status === "in-progress" || status === "ringing"
+              ? fmtElapsedSince(call.created_at)
+              : "—";
+        return {
+          id: call.id,
+          participant: (call.participant_name || "Unknown Participant").trim(),
+          phone: call.participant_phone || "—",
+          campaign:
+            campaignNameById.get(call.research_campaign_id || "") ||
+            "Untitled Campaign",
+          status,
+          duration,
+          currentQuestionIndex: call.current_question_index ?? 0,
+          scheduledFor: fmtTime(call.scheduled_for),
+          completedAt: fmtTime(call.completed_at || call.created_at),
+        } as LiveCall;
+      });
+
+      setCalls(mapped);
+      setLoading(false);
+    };
+
+    void load();
+  }, [router]);
+
+  const activeCalls = useMemo(
+    () => calls.filter((c) => ["active", "in-progress", "ringing"].includes(c.status)),
+    [calls]
+  );
+  const pendingCalls = useMemo(
+    () => calls.filter((c) => ["pending", "scheduled"].includes(c.status)),
+    [calls]
+  );
+  const recentCompleted = useMemo(
+    () =>
+      calls.filter((c) =>
+        ["completed", "failed", "missed", "expired"].includes(c.status)
+      ),
+    [calls]
+  );
+
   return (
     <div className="animate-fade-in">
-      {/* Header */}
       <div style={{ marginBottom: "28px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "6px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            marginBottom: "6px",
+          }}
+        >
           <h1 style={{ fontSize: "26px", fontWeight: 700, color: "var(--text-primary)" }}>
             Live Call Monitor
           </h1>
@@ -72,8 +182,40 @@ export default function LiveCallsPage() {
         </p>
       </div>
 
-      {/* Active calls */}
-      <div className="stagger-children" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: "20px", marginBottom: "32px" }}>
+      {loading && (
+        <div className="card" style={{ padding: "16px 20px", marginBottom: "20px" }}>
+          Loading live calls…
+        </div>
+      )}
+
+      {!loading && error && (
+        <div
+          className="card"
+          style={{
+            padding: "16px 20px",
+            marginBottom: "20px",
+            borderColor: "var(--danger)",
+          }}
+        >
+          <span style={{ color: "#991B1B" }}>{error}</span>
+        </div>
+      )}
+
+      <div
+        className="stagger-children"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))",
+          gap: "20px",
+          marginBottom: "32px",
+        }}
+      >
+        {!loading && !error && activeCalls.length === 0 && (
+          <div className="card" style={{ padding: "16px 20px" }}>
+            No active calls right now.
+          </div>
+        )}
+
         {activeCalls.map((call) => (
           <div
             key={call.id}
@@ -84,7 +226,6 @@ export default function LiveCallsPage() {
               border: "1.5px solid rgba(45, 212, 160, 0.2)",
             }}
           >
-            {/* Call header */}
             <div
               style={{
                 display: "flex",
@@ -110,7 +251,10 @@ export default function LiveCallsPage() {
                     fontWeight: 700,
                   }}
                 >
-                  {call.participant.split(" ").map((n) => n[0]).join("")}
+                  {call.participant
+                    .split(" ")
+                    .map((n) => n[0])
+                    .join("")}
                 </div>
                 <div>
                   <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary)" }}>
@@ -132,97 +276,57 @@ export default function LiveCallsPage() {
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
-                <span className="status-dot status-dot-active" />
+                <span
+                  className={`status-dot ${
+                    call.status === "ringing" ? "status-dot-pending" : "status-dot-active"
+                  }`}
+                />
                 {call.duration}
               </div>
             </div>
 
-            {/* Call body */}
             <div style={{ padding: "16px 20px" }}>
               <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "6px" }}>
                 Campaign: {call.campaign}
               </div>
 
-              {/* Current question */}
               <div
                 style={{
                   padding: "12px 16px",
                   background: "var(--bg-base)",
                   borderRadius: "var(--radius-sm)",
-                  marginBottom: "16px",
+                  marginBottom: "12px",
                   borderLeft: "3px solid var(--primary)",
                 }}
               >
-                <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--primary)", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  Current Question ({call.questionIndex}/{call.totalQuestions})
-                </div>
-                <div style={{ fontSize: "13px", color: "var(--text-primary)", lineHeight: 1.5 }}>
-                  {call.currentQuestion}
-                </div>
-              </div>
-
-              {/* Progress */}
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <div
                   style={{
-                    flex: 1,
-                    height: "6px",
-                    borderRadius: "var(--radius-full)",
-                    background: "var(--bg-muted)",
-                    overflow: "hidden",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: "var(--primary)",
+                    marginBottom: "4px",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
                   }}
                 >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${(call.questionIndex / call.totalQuestions) * 100}%`,
-                      borderRadius: "var(--radius-full)",
-                      background: "var(--primary)",
-                      transition: "width 600ms ease",
-                    }}
-                  />
+                  Current position
                 </div>
-                <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)" }}>
-                  {Math.round((call.questionIndex / call.totalQuestions) * 100)}%
-                </span>
+                <div style={{ fontSize: "13px", color: "var(--text-primary)", lineHeight: 1.5 }}>
+                  {call.currentQuestionIndex > 0
+                    ? `On question ${call.currentQuestionIndex}`
+                    : "Interview started"}
+                </div>
               </div>
 
-              {/* Audio waveform */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "2px",
-                  height: "28px",
-                  marginTop: "16px",
-                  justifyContent: "center",
-                }}
-              >
-                {Array.from({ length: 32 }).map((_, j) => {
-                  const h = Math.random() * 20 + 4;
-                  return (
-                    <div
-                      key={j}
-                      style={{
-                        width: "3px",
-                        height: `${h}px`,
-                        borderRadius: "2px",
-                        background: "var(--primary)",
-                        opacity: 0.2 + Math.random() * 0.5,
-                        transition: "height 300ms ease",
-                      }}
-                    />
-                  );
-                })}
+              <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                Live call in progress
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Two column: Pending + Recent */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-        {/* Pending */}
         <div className="card" style={{ padding: 0 }}>
           <div
             style={{
@@ -237,20 +341,26 @@ export default function LiveCallsPage() {
               Queue ({pendingCalls.length})
             </h2>
           </div>
+
+          {!loading && !error && pendingCalls.length === 0 && (
+            <div style={{ padding: "14px 24px", color: "var(--text-muted)", fontSize: "13px" }}>
+              No queued calls.
+            </div>
+          )}
+
           {pendingCalls.map((call, i) => (
             <div
-              key={call.participant}
+              key={call.id}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: "12px",
                 padding: "14px 24px",
-                borderBottom: i < pendingCalls.length - 1 ? "1px solid var(--border-light)" : "none",
+                borderBottom:
+                  i < pendingCalls.length - 1 ? "1px solid var(--border-light)" : "none",
               }}
             >
-              <span
-                className={`status-dot ${call.status === "ringing" ? "status-dot-active" : "status-dot-pending"}`}
-              />
+              <span className="status-dot status-dot-pending" />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "14px", fontWeight: 500, color: "var(--text-primary)" }}>
                   {call.participant}
@@ -262,14 +372,11 @@ export default function LiveCallsPage() {
               <div style={{ fontSize: "13px", color: "var(--text-muted)", fontWeight: 500 }}>
                 {call.scheduledFor}
               </div>
-              <span className={`badge ${call.status === "ringing" ? "badge-success" : "badge-warning"}`}>
-                {call.status === "ringing" ? "Ringing" : "Pending"}
-              </span>
+              <span className="badge badge-warning">Pending</span>
             </div>
           ))}
         </div>
 
-        {/* Recently completed */}
         <div className="card" style={{ padding: 0 }}>
           <div
             style={{
@@ -281,15 +388,25 @@ export default function LiveCallsPage() {
               Recently Completed
             </h2>
           </div>
+
+          {!loading && !error && recentCompleted.length === 0 && (
+            <div style={{ padding: "14px 24px", color: "var(--text-muted)", fontSize: "13px" }}>
+              No completed/failed calls yet.
+            </div>
+          )}
+
           {recentCompleted.map((call, i) => (
             <div
-              key={call.participant}
+              key={call.id}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: "12px",
                 padding: "14px 24px",
-                borderBottom: i < recentCompleted.length - 1 ? "1px solid var(--border-light)" : "none",
+                borderBottom:
+                  i < recentCompleted.length - 1
+                    ? "1px solid var(--border-light)"
+                    : "none",
               }}
             >
               <div
@@ -309,7 +426,14 @@ export default function LiveCallsPage() {
                   {call.campaign}
                 </div>
               </div>
-              <div style={{ fontSize: "13px", color: "var(--text-secondary)", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>
+              <div
+                style={{
+                  fontSize: "13px",
+                  color: "var(--text-secondary)",
+                  fontWeight: 500,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
                 {call.duration}
               </div>
               <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
