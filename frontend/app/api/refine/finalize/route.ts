@@ -117,6 +117,15 @@ async function sendChatCompletion(
   let lastError = "No provider configured.";
   for (const provider of providers) {
     if (!provider.apiKey) continue;
+    const providerMessages =
+      provider.name === "gemini" &&
+      !messages.some(
+        (m) =>
+          (m.role === "user" || m.role === "assistant") &&
+          m.content.trim().length > 0
+      )
+        ? [...messages, { role: "user" as const, content: "Start now." }]
+        : messages;
     const resp = await fetch(provider.endpoint, {
       method: "POST",
       headers: {
@@ -125,7 +134,7 @@ async function sendChatCompletion(
       },
       body: JSON.stringify({
         model: provider.model,
-        messages,
+        messages: providerMessages,
         response_format: { type: "json_object" },
         temperature,
       }),

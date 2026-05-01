@@ -15,10 +15,10 @@ type CallRow = {
   status: string | null;
   duration_seconds: number | null;
   created_at: string;
+  transcripts: TranscriptRow[] | null;
 };
 
 type TranscriptRow = {
-  call_id: string | null;
   sentiment: "positive" | "neutral" | "negative" | null;
 };
 
@@ -123,7 +123,9 @@ export default function AnalyticsPage() {
 
       const { data: callsData, error: callsError } = await supabase
         .from("calls")
-        .select("id, research_campaign_id, status, duration_seconds, created_at")
+        .select(
+          "id, research_campaign_id, status, duration_seconds, created_at, transcripts(sentiment)"
+        )
         .in("research_campaign_id", campaignIds);
 
       if (callsError) {
@@ -133,29 +135,7 @@ export default function AnalyticsPage() {
       }
 
       const calls = (callsData as CallRow[] | null) ?? [];
-      const callIds = calls.map((c) => c.id);
-
-      const { data: transcriptsData, error: transcriptsError } = callIds.length
-        ? await supabase
-            .from("transcripts")
-            .select("call_id, sentiment")
-            .in("call_id", callIds)
-        : { data: [], error: null };
-
-      if (transcriptsError) {
-        setError(transcriptsError.message || "Failed to load transcript analytics.");
-        setLoading(false);
-        return;
-      }
-
-      const transcripts = (transcriptsData as TranscriptRow[] | null) ?? [];
-      const byCallId = new Map<string, TranscriptRow[]>();
-      for (const t of transcripts) {
-        if (!t.call_id) continue;
-        const arr = byCallId.get(t.call_id) ?? [];
-        arr.push(t);
-        byCallId.set(t.call_id, arr);
-      }
+      const transcripts = calls.flatMap((call) => call.transcripts ?? []);
 
       const total = calls.length;
       const completedCalls = calls.filter((c) => (c.status || "").toLowerCase() === "completed");
@@ -183,7 +163,7 @@ export default function AnalyticsPage() {
       }).length;
       const retrySuccess = retryCalls.length > 0 ? (retrySuccessCount / retryCalls.length) * 100 : 0;
 
-      const callsWithTranscript = calls.filter((c) => (byCallId.get(c.id) ?? []).length > 0).length;
+      const callsWithTranscript = calls.filter((c) => (c.transcripts ?? []).length > 0).length;
       const consent = total > 0 ? (callsWithTranscript / total) * 100 : 0;
 
       const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
@@ -245,7 +225,7 @@ export default function AnalyticsPage() {
           bucket.completed += 1;
           bucket.durationSum += call.duration_seconds ?? 0;
         }
-        const tx = byCallId.get(call.id) ?? [];
+        const tx = call.transcripts ?? [];
         if (tx.length > 0) bucket.transcripted += 1;
         for (const t of tx) {
           if (t.sentiment === "positive") bucket.positive += 1;
