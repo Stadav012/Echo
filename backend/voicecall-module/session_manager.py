@@ -9,9 +9,13 @@ from typing import Any
 
 import httpx
 
+from agent import KICKOFF_MARKER, run_research_agent
 from config import (
     BASE_URL,
     CALLBACK_SECRET,
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_MODEL,
     REDIS_URL,
     SESSION_TIMEOUT_SECONDS,
 )
@@ -37,6 +41,12 @@ class SessionManager:
         # Agent WebSocket relay (external backend ↔ pipeline)
         self._agent_ws: dict[str, Any] = {}
         self._agent_queues: dict[str, asyncio.Queue] = {}
+        # In-process ResearchAgent task per session
+        self._agent_tasks: dict[str, asyncio.Task] = {}
+        # Browser-facing WebSocket per session (for pushing transcript JSON)
+        self._browser_ws: dict[str, Any] = {}
+        # Per-session event signalled by BotSpeakingWatchdog when TTS finishes
+        self._bot_speaking_done: dict[str, asyncio.Event] = {}
 
     async def startup(self) -> None:
         if REDIS_URL:
@@ -66,6 +76,9 @@ class SessionManager:
             return_exceptions=True,
         )
 
+        for sid in list(self._agent_tasks.keys()):
+            self._cancel_agent_task(sid)
+
         if self._redis:
             await self._redis.aclose()
 
@@ -94,7 +107,40 @@ class SessionManager:
 
         await self._save(session)
         logger.info("Session created: %s for customer %s", session.session_id, session.customer_id)
+        self._spawn_agent(session)
         return session
+
+    def _spawn_agent(self, session: SessionState) -> None:
+        """Start the in-process ResearchAgent task for this session."""
+        if not LLM_BASE_URL:
+            logger.warning(
+                "LLM_BASE_URL not set; skipping ResearchAgent spawn for %s",
+                session.session_id,
+            )
+            return
+
+        async def _runner() -> None:
+            try:
+                await run_research_agent(session, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.exception(
+                    "ResearchAgent crashed for session %s: %s", session.session_id, exc
+                )
+
+        task = asyncio.create_task(_runner())
+        self._agent_tasks[session.session_id] = task
+        logger.info(
+            "ResearchAgent task spawned for session %s (model=%s)",
+            session.session_id,
+            LLM_MODEL,
+        )
+
+    def _cancel_agent_task(self, session_id: str) -> None:
+        task = self._agent_tasks.pop(session_id, None)
+        if task and not task.done():
+            task.cancel()
 
     async def get_session(self, session_id: str) -> SessionState | None:
         session = await self._load(session_id)
@@ -123,6 +169,8 @@ class SessionManager:
     async def expire_session(self, session_id: str) -> None:
         await self.update_status(session_id, "expired")
         self._pipelines.pop(session_id, None)
+        self._bot_speaking_done.pop(session_id, None)
+        self._cancel_agent_task(session_id)
         logger.info("Session expired: %s", session_id)
 
     async def send_callback(self, session_id: str) -> None:
@@ -208,23 +256,133 @@ class SessionManager:
             logger.warning("Failed to send transcription to agent for %s: %s", session_id, exc)
             return False
 
-    async def get_agent_response(self, session_id: str, timeout: float = 10.0) -> str | None:
-        """Wait for the external backend to push an LLM response. Returns None
-        on timeout or if no backend is connected."""
+    async def kickoff_agent(self, session_id: str, timeout: float = 5.0) -> None:
+        """Inject a synthetic kickoff transcription into the pipeline so the
+        agent speaks first (greeting + Q1) before the participant says
+        anything. Waits briefly for the pipeline task to be registered."""
+        from pipecat.frames.frames import TranscriptionFrame
+
+        deadline = asyncio.get_event_loop().time() + timeout
+        task = self._pipelines.get(session_id)
+        while task is None and asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(0.1)
+            task = self._pipelines.get(session_id)
+
+        if task is None:
+            logger.warning("kickoff_agent: no pipeline registered for %s", session_id)
+            return
+
+        frame = TranscriptionFrame(
+            text=KICKOFF_MARKER,
+            user_id="system",
+            timestamp=_iso(_now()),
+        )
+        try:
+            await task.queue_frames([frame])
+            logger.info("Kickoff transcription queued for session %s", session_id)
+        except Exception as exc:
+            logger.warning("kickoff_agent failed for %s: %s", session_id, exc)
+
+    async def get_agent_response(
+        self, session_id: str, timeout: float = 10.0
+    ) -> tuple[str | None, bool]:
+        """Wait for the in-process agent to push a reply. Returns (text, end_after)."""
         q = self._agent_queues.get(session_id)
         if q is None:
-            return None
+            return None, False
         try:
-            return await asyncio.wait_for(q.get(), timeout=timeout)
+            item = await asyncio.wait_for(q.get(), timeout=timeout)
         except asyncio.TimeoutError:
             logger.warning("Agent response timeout for session %s", session_id)
-            return None
+            return None, False
 
-    def put_agent_response(self, session_id: str, text: str) -> None:
+        if isinstance(item, dict):
+            return (item.get("text"), bool(item.get("end_after")))
+        if isinstance(item, str):
+            return item, False
+        return None, False
+
+    def put_agent_response(self, session_id: str, text: str, end_after: bool = False) -> None:
         """Called by the /agent WebSocket handler when a response arrives."""
         q = self._agent_queues.get(session_id)
         if q:
-            q.put_nowait(text)
+            q.put_nowait({"text": text, "end_after": end_after})
+
+    async def end_session(self, session_id: str, reason: str, *, force_cancel: bool = False) -> None:
+        """Mark completed, send callback, stop pipeline, notify browser, tear down agent."""
+        session = await self._load(session_id)
+        if session is None:
+            return
+        if session.status in ("completed", "expired"):
+            logger.info("end_session noop (already terminal) %s", session_id)
+            return
+
+        await self.update_status(session_id, "completed")
+        await self.send_callback(session_id)
+
+        pipe = self._pipelines.get(session_id)
+        if pipe:
+            try:
+                if force_cancel:
+                    await pipe.cancel(reason=reason)
+                else:
+                    await pipe.stop_when_done()
+            except Exception as exc:
+                logger.warning("end_session pipeline stop for %s: %s", session_id, exc)
+
+        await self.send_browser_message(session_id, {"type": "session_end"})
+
+        ws = self._browser_ws.get(session_id)
+        if ws and force_cancel:
+            try:
+                await ws.close(code=1000)
+            except Exception:
+                pass
+
+        self._cancel_agent_task(session_id)
+        self.disconnect_agent(session_id)
+        self._bot_speaking_done.pop(session_id, None)
+
+    # ------------------------------------------------------------------
+    # Browser-facing WebSocket (participant page)
+    # ------------------------------------------------------------------
+
+    def register_browser_ws(self, session_id: str, websocket: Any) -> None:
+        self._browser_ws[session_id] = websocket
+
+    def unregister_browser_ws(self, session_id: str) -> None:
+        self._browser_ws.pop(session_id, None)
+
+    async def send_browser_message(self, session_id: str, payload: dict[str, Any]) -> bool:
+        """Push a JSON message to the participant page. Returns False if the
+        socket isn't registered or send failed."""
+        ws = self._browser_ws.get(session_id)
+        if ws is None:
+            return False
+        try:
+            await ws.send_json(payload)
+            return True
+        except Exception as exc:
+            logger.warning("Failed to push browser message for %s: %s", session_id, exc)
+            return False
+
+    # ------------------------------------------------------------------
+    # Bot-speaking lifecycle (driven by BotSpeakingWatchdog in pipeline.py)
+    # ------------------------------------------------------------------
+
+    def arm_bot_speaking_done(self, session_id: str) -> asyncio.Event:
+        """Create (or reset) the event awaited by BackendRelayProcessor while
+        TTS is playing. Called immediately before pushing a TextFrame to TTS."""
+        ev = asyncio.Event()
+        self._bot_speaking_done[session_id] = ev
+        return ev
+
+    def signal_bot_speaking_done(self, session_id: str) -> None:
+        """Called by BotSpeakingWatchdog when Pipecat publishes
+        BotStoppedSpeakingFrame — i.e. TTS audio has fully drained."""
+        ev = self._bot_speaking_done.get(session_id)
+        if ev and not ev.is_set():
+            ev.set()
 
     # ------------------------------------------------------------------
     # Pipeline tracking
@@ -254,6 +412,8 @@ class SessionManager:
         await self.update_status(session_id, "completed")
         await self.send_callback(session_id)
         self.remove_pipeline(session_id)
+        self._bot_speaking_done.pop(session_id, None)
+        self._cancel_agent_task(session_id)
 
     async def _save(self, session: SessionState) -> None:
         if self._redis:

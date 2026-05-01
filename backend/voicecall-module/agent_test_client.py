@@ -1,8 +1,14 @@
 """
-agent_test_client.py — Simulated backend agent for testing.
+agent_test_client.py — LEGACY manual smoke-test for the /agent/{id} WebSocket.
 
-This script acts as the external backend that has the LLM.
-For now it reads responses from dummy_responses.txt instead of a real LLM.
+The runtime now spawns a ResearchOrchestrator (see agent.py) inside the FastAPI
+service for every new session, which means /agent/{id} is normally already
+occupied. Running this script against a session created via the normal flow
+will race the in-process agent and produce duplicate replies.
+
+Keep it around only for verifying the WS protocol in isolation. To use it,
+disable the in-process agent (e.g. by unsetting LLM_BASE_URL) before
+creating the session.
 
 Usage:
     # Let the script create a session for you:

@@ -1,0 +1,2 @@
+[2026-04-30T19:26:19Z] SYSTEM: Session started — customer_id=6024576b-6c26-41a2-8615-e0afe439ac29 name=Emma Brooks
+[2026-04-30T19:26:33Z] AGENT: Hello Emma, thanks for joining our onboarding conversation! I'm excited to dive into your experience using the product and explore what made it a challenge for you at first. What's your name?

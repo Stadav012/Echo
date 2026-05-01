@@ -1,0 +1,32 @@
+[2026-04-30T23:24:00Z] SYSTEM: Session started — customer_id=6024576b-6c26-41a2-8615-e0afe439ac29 name=Emma Brooks
+[2026-04-30T23:24:05Z] AGENT: Hello Emma, thank you for joining our User Onboarding Drop-Off Study. I'm Alex and this conversation is about understanding why trial users abandon onboarding in the first week.
+[2026-04-30T23:24:21Z] CUSTOMER: Alright. Sure. That's fine.
+[2026-04-30T23:24:22Z] AGENT: Emma, can you tell me more about how you felt when you first started using this product?
+[2026-04-30T23:24:32Z] CUSTOMER: Honestly, I I felt a bit confused, especially with the manual. It was
+[2026-04-30T23:24:33Z] AGENT: What stood out as fun or exciting about that experience?
+[2026-04-30T23:24:42Z] CUSTOMER: Nothing, honestly.
+[2026-04-30T23:24:42Z] AGENT: Could you say a bit more about that? What stood out as fun or exciting about that experience?
+[2026-04-30T23:24:54Z] CUSTOMER: The unboxing, I guess.
+[2026-04-30T23:24:54Z] AGENT: Was there a moment when you weren’t sure what to do next? If so, what was happening at that point?
+[2026-04-30T23:25:07Z] CUSTOMER: It was the unboxing. I wasn't sure, what
+[2026-04-30T23:25:08Z] AGENT: You mentioned the manual—could you tell me more about what made it difficult to use?
+[2026-04-30T23:25:18Z] CUSTOMER: yeah, it was long.
+[2026-04-30T23:25:19Z] AGENT: Could you say a bit more about that? You mentioned the manual—could you tell me more about what made it difficult to use?
+[2026-04-30T23:25:29Z] CUSTOMER: Yes. The manual is long.
+[2026-04-30T23:25:30Z] AGENT: Okay, that helps clarify things. Can you think of any other setup step that might have felt unnecessary or overly complicated?
+[2026-04-30T23:25:43Z] CUSTOMER: Setting up the legs, I guess.
+[2026-04-30T23:25:44Z] AGENT: Emma, can you elaborate on what made setting up the legs feel unnecessary or overly complicated?
+[2026-04-30T23:25:53Z] CUSTOMER: There were a lot of pieces
+[2026-04-30T23:25:54Z] AGENT: What would have helped you move through onboarding more quickly?
+[2026-04-30T23:26:02Z] CUSTOMER: maybe a tutorial video.
+[2026-04-30T23:26:03Z] AGENT: Could you say a bit more about that? What would have helped you move through onboarding more quickly?
+[2026-04-30T23:26:12Z] CUSTOMER: If you include in a tutorial video, that'll
+[2026-04-30T23:26:13Z] AGENT: Think about any messages, tooltips, or emails you saw—were any especially helpful or unhelpful?
+[2026-04-30T23:26:23Z] CUSTOMER: Not really.
+[2026-04-30T23:26:23Z] AGENT: Emma, can you think of any specific examples that stood out as particularly helpful or unhelpful?
+[2026-04-30T23:26:33Z] CUSTOMER: I mean,
+[2026-04-30T23:26:34Z] AGENT: Emma, thank you for sharing your thoughts. It sounds like you're looking forward to using the product.
+[2026-04-30T23:26:45Z] CUSTOMER: Yeah. Right. Sure.
+[2026-04-30T23:26:46Z] AGENT: Could you say a bit more about that? What single change would give you the most confidence to keep using the product after day one?
+[2026-04-30T23:26:57Z] CUSTOMER: A good manual.
+[2026-04-30T23:26:57Z] AGENT: That's everything I wanted to ask, Emma. Thanks so much for taking the time — really appreciate your thoughts. Take care.
